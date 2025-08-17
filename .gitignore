@@ -85,6 +85,3 @@ pgdata/
 postgresql.conf
 pg_hba.conf
 
-# AI Memory / Development files
-CLAUDE.md
-
