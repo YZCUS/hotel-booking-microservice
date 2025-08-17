@@ -196,7 +196,7 @@ curl http://localhost:8085/actuator/health  # Notification
 - Startup order: `docker-compose ps` and inspect infra logs
 - DB access: `docker-compose exec postgres psql -U hotel_user -d hotel_reservation -c "SELECT version();"`
 
-### Implementation Notes (Consolidated from former README_IMPLEMENTATION.md)
+### Implementation Notes
 
 #### Implemented Services
 
