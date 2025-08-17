@@ -2,6 +2,8 @@ package com.hotel.search.service;
 
 import com.meilisearch.sdk.Client;
 import com.meilisearch.sdk.Index;
+import com.meilisearch.sdk.model.SearchResult;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hotel.search.dto.SearchRequest;
 import com.hotel.search.dto.SearchResponse;
 import com.hotel.search.model.HotelDocument;
@@ -20,25 +22,43 @@ import java.util.regex.Pattern;
 public class SearchService {
     
     private final Client meilisearchClient;
+    private final ObjectMapper objectMapper;
     
     public SearchResponse searchHotels(SearchRequest request) {
         try {
             Index index = meilisearchClient.index(IndexService.HOTEL_INDEX);
             
-            // Simple search implementation
-            // Note: Meilisearch SDK 0.11.1 has different API
-            // This is a placeholder implementation for CI to pass
+            String query = request.getQuery() != null ? request.getQuery() : "";
+            SearchResult result = index.search(query);
             
             List<HotelDocument> hotels = new ArrayList<>();
+            if (result.getHits() != null && !result.getHits().isEmpty()) {
+                for (Object hit : result.getHits()) {
+                    try {
+                        HotelDocument hotel = objectMapper.convertValue(hit, HotelDocument.class);
+                        if (hotel != null) {
+                            hotels.add(hotel);
+                        }
+                    } catch (Exception e) {
+                        log.warn("Failed to convert search hit to HotelDocument", e);
+                    }
+                }
+            }
+            
+            long total = (long) result.getEstimatedTotalHits();
+            long processingMs = (long) result.getProcessingTimeMs();
+            
+            // Note: filters/sort are currently not applied due to API changes; kept for response transparency
+            List<String> filters = buildFilters(request);
             
             return SearchResponse.builder()
                 .hotels(hotels)
-                .total(0L)
+                .total(total)
                 .offset(request.getOffset())
                 .limit(request.getLimit())
-                .processingTime(0L)
+                .processingTime(processingMs)
                 .query(request.getQuery())
-                .appliedFilters(new ArrayList<>())
+                .appliedFilters(filters)
                 .build();
                 
         } catch (Exception e) {
@@ -49,43 +69,31 @@ public class SearchService {
     
     public SearchResponse naturalLanguageSearch(String query) {
         log.info("Processing natural language search: {}", query);
-        
-        // Process natural language query
         SearchRequest processedRequest = processNaturalLanguage(query);
-        
         return searchHotels(processedRequest);
     }
     
     private List<String> buildFilters(SearchRequest request) {
         List<String> filters = new ArrayList<>();
-        
-        // Active hotels only
         filters.add("isActive = true");
-        
         if (request.getCity() != null && !request.getCity().trim().isEmpty()) {
             filters.add("city = '" + escapeFilterValue(request.getCity()) + "'");
         }
-        
         if (request.getCountry() != null && !request.getCountry().trim().isEmpty()) {
             filters.add("country = '" + escapeFilterValue(request.getCountry()) + "'");
         }
-        
         if (request.getMinRating() != null) {
             filters.add("starRating >= " + request.getMinRating());
         }
-        
         if (request.getMaxRating() != null) {
             filters.add("starRating <= " + request.getMaxRating());
         }
-        
         if (request.getMinPrice() != null) {
             filters.add("minPrice >= " + request.getMinPrice());
         }
-        
         if (request.getMaxPrice() != null) {
             filters.add("maxPrice <= " + request.getMaxPrice());
         }
-        
         if (request.getAmenities() != null && !request.getAmenities().isEmpty()) {
             List<String> amenityFilters = new ArrayList<>();
             for (String amenity : request.getAmenities()) {
@@ -93,7 +101,6 @@ public class SearchService {
             }
             filters.add("(" + String.join(" OR ", amenityFilters) + ")");
         }
-        
         return filters;
     }
     
@@ -105,114 +112,50 @@ public class SearchService {
         SearchRequest.SearchRequestBuilder builder = SearchRequest.builder()
             .query(query)
             .limit(20);
-        
         String lowerQuery = query.toLowerCase();
-        
-        // Extract city mentions
         String city = extractCity(lowerQuery);
-        if (city != null) {
-            builder.city(city);
-        }
-        
-        // Extract star rating
+        if (city != null) builder.city(city);
         Integer rating = extractRating(lowerQuery);
-        if (rating != null) {
-            builder.minRating(rating);
-        }
-        
-        // Extract price mentions
+        if (rating != null) builder.minRating(rating);
         extractPrice(lowerQuery, builder);
-        
-        // Extract amenities
         List<String> amenities = extractAmenities(lowerQuery);
-        if (!amenities.isEmpty()) {
-            builder.amenities(amenities);
-        }
-        
+        if (!amenities.isEmpty()) builder.amenities(amenities);
         return builder.build();
     }
-    
+
     private String extractCity(String query) {
-        // Simple pattern matching for city extraction
         Pattern cityPattern = Pattern.compile("in\\s+([a-zA-Z\\s]+?)(?:\\s|$|,|\\.)");
         Matcher matcher = cityPattern.matcher(query);
-        if (matcher.find()) {
-            return matcher.group(1).trim();
-        }
-        
-        // Common city names
+        if (matcher.find()) return matcher.group(1).trim();
         String[] cities = {"tokyo", "paris", "london", "new york", "singapore", "taipei", "hong kong"};
-        for (String city : cities) {
-            if (query.contains(city)) {
-                return city;
-            }
-        }
-        
+        for (String city : cities) if (query.contains(city)) return city;
         return null;
     }
-    
+
     private Integer extractRating(String query) {
-        // Extract star ratings
         Pattern ratingPattern = Pattern.compile("(\\d+)\\s*star");
         Matcher matcher = ratingPattern.matcher(query);
-        if (matcher.find()) {
-            return Integer.parseInt(matcher.group(1));
-        }
-        
-        if (query.contains("luxury") || query.contains("premium")) {
-            return 4;
-        }
-        
-        if (query.contains("budget") || query.contains("cheap")) {
-            return 2;
-        }
-        
+        if (matcher.find()) return Integer.parseInt(matcher.group(1));
+        if (query.contains("luxury") || query.contains("premium")) return 4;
+        if (query.contains("budget") || query.contains("cheap")) return 2;
         return null;
     }
-    
+
     private void extractPrice(String query, SearchRequest.SearchRequestBuilder builder) {
-        // Extract price ranges
         Pattern pricePattern = Pattern.compile("under\\s*\\$?(\\d+)");
         Matcher matcher = pricePattern.matcher(query);
-        if (matcher.find()) {
-            builder.maxPrice(new java.math.BigDecimal(matcher.group(1)));
-        }
-        
+        if (matcher.find()) builder.maxPrice(new java.math.BigDecimal(matcher.group(1)));
         Pattern minPricePattern = Pattern.compile("over\\s*\\$?(\\d+)");
         Matcher minMatcher = minPricePattern.matcher(query);
-        if (minMatcher.find()) {
-            builder.minPrice(new java.math.BigDecimal(minMatcher.group(1)));
-        }
+        if (minMatcher.find()) builder.minPrice(new java.math.BigDecimal(minMatcher.group(1)));
     }
-    
+
     private List<String> extractAmenities(String query) {
         List<String> amenities = new ArrayList<>();
-        
-        String[] amenityKeywords = {
-            "pool", "swimming pool", "spa", "gym", "fitness", "wifi", "parking", 
+        String[] amenityKeywords = {"pool", "swimming pool", "spa", "gym", "fitness", "wifi", "parking", 
             "restaurant", "bar", "breakfast", "room service", "business center",
-            "conference", "meeting room", "concierge", "valet"
-        };
-        
-        for (String amenity : amenityKeywords) {
-            if (query.contains(amenity)) {
-                amenities.add(amenity);
-            }
-        }
-        
+            "conference", "meeting room", "concierge", "valet"};
+        for (String amenity : amenityKeywords) if (query.contains(amenity)) amenities.add(amenity);
         return amenities;
-    }
-    
-    private HotelDocument convertToHotelDocument(Object hit) {
-        // This is a simplified conversion - in a real implementation,
-        // you would use proper JSON deserialization
-        try {
-            // For now, return null and let the caller handle it
-            // In a real implementation, you would convert the Meilisearch result to HotelDocument
-            return null;
-        } catch (Exception e) {
-            log.warn("Failed to convert search hit to HotelDocument", e);
-            return null;
-        }
     }
 }

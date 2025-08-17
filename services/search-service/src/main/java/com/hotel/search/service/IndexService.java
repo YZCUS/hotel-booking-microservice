@@ -3,6 +3,7 @@ package com.hotel.search.service;
 import com.meilisearch.sdk.Client;
 import com.meilisearch.sdk.Index;
 import com.hotel.search.model.HotelDocument;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -16,6 +17,7 @@ import java.util.List;
 public class IndexService {
     
     private final Client meilisearchClient;
+    private final ObjectMapper objectMapper;
     
     public static final String HOTEL_INDEX = "hotels";
     
@@ -64,9 +66,8 @@ public class IndexService {
     public void indexHotel(HotelDocument hotel) {
         try {
             Index index = meilisearchClient.index(HOTEL_INDEX);
-            // Note: Meilisearch SDK 0.11.1 requires JSON string
-            // This is a placeholder - proper JSON serialization needed
-            log.info("Added hotel to index: {}", hotel.getId());
+            String json = objectMapper.writeValueAsString(java.util.List.of(hotel));
+            index.addDocuments(json);
             log.info("Hotel indexed successfully: {}", hotel.getId());
         } catch (Exception e) {
             log.error("Failed to index hotel: {}", hotel.getId(), e);
@@ -76,10 +77,12 @@ public class IndexService {
     
     public void indexHotels(List<HotelDocument> hotels) {
         try {
+            if (hotels == null || hotels.isEmpty()) {
+                return;
+            }
             Index index = meilisearchClient.index(HOTEL_INDEX);
-            // Note: Meilisearch SDK 0.11.1 requires JSON string
-            // This is a placeholder - proper JSON serialization needed
-            log.info("Bulk indexing {} hotels", hotels.size());
+            String json = objectMapper.writeValueAsString(hotels);
+            index.addDocuments(json);
             log.info("Indexed {} hotels successfully", hotels.size());
         } catch (Exception e) {
             log.error("Failed to index hotels batch", e);
@@ -90,9 +93,8 @@ public class IndexService {
     public void updateHotel(HotelDocument hotel) {
         try {
             Index index = meilisearchClient.index(HOTEL_INDEX);
-            // Note: Meilisearch SDK 0.11.1 requires JSON string
-            // This is a placeholder - proper JSON serialization needed
-            log.info("Updated hotel in index: {}", hotel.getId());
+            String json = objectMapper.writeValueAsString(java.util.List.of(hotel));
+            index.updateDocuments(json);
             log.info("Hotel updated successfully: {}", hotel.getId());
         } catch (Exception e) {
             log.error("Failed to update hotel: {}", hotel.getId(), e);

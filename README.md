@@ -128,7 +128,7 @@ See source under each service’s `controller` and `resources` for exact endpoin
 
 This README has been consolidated. The Docker guide and implementation notes are now included below.
 
-### Docker Guide (Consolidated from former README-Docker.md)
+### Docker Guide
 
 #### Overview
 
