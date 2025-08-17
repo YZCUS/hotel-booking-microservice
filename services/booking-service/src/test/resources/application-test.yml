@@ -13,6 +13,7 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.H2Dialect
         format_sql: true
+        default_schema: PUBLIC
   
   redis:
     host: localhost
@@ -27,3 +28,11 @@ logging:
     com.hotel.booking: DEBUG
     org.springframework.retry: DEBUG
     org.hibernate: DEBUG
+
+booking:
+  pricing:
+    weekend-premium: 0.20
+    summer-premium: 0.15
+    winter-premium: 0.25
+    advance-booking-discount: 0.10
+    advance-booking-days: 30

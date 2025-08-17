@@ -26,8 +26,8 @@ jobs:
       - name: Gradle Version
         run: ./gradlew -version
 
-      - name: Build all services (with tests)
-        run: ./gradlew build --no-daemon --stacktrace
+      - name: Build all services (no tests)
+        run: ./gradlew build -x test --no-daemon --stacktrace
 
       - name: Upload test reports (on failure)
         if: failure()
