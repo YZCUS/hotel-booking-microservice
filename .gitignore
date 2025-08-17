@@ -25,6 +25,9 @@ Thumbs.db
 # Build outputs
 **/bin/
 **/out/
+
+# Local assistant artifacts
+.claude/
 # OS / Editor
 .DS_Store
 Thumbs.db
