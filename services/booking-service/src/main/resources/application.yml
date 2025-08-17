@@ -1,0 +1,107 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: booking-service
+  
+  datasource:
+    url: jdbc:postgresql://localhost:5432/hotel_reservation
+    username: hotel_user
+    password: hotel_password
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      idle-timeout: 300000
+      connection-timeout: 30000
+      leak-detection-threshold: 60000
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        default_schema: booking_svc
+        jdbc:
+          time_zone: UTC
+        connection:
+          provider_disables_autocommit: true
+    open-in-view: false
+
+  redis:
+    host: localhost
+    port: 6379
+    password: 
+    timeout: 2000ms
+    jedis:
+      pool:
+        max-active: 8
+        max-idle: 8
+        min-idle: 0
+        max-wait: -1ms
+
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+    virtual-host: /
+    connection-timeout: 30000
+    listener:
+      simple:
+        retry:
+          enabled: true
+          initial-interval: 1000
+          max-attempts: 3
+          multiplier: 2
+
+  retry:
+    policy:
+      exponential:
+        initial-interval: 100ms
+        max-interval: 2000ms
+        multiplier: 2
+        max-attempts: 3
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+logging:
+  level:
+    com.hotel.booking: DEBUG
+    org.springframework.retry: DEBUG
+    org.springframework.orm.jpa: DEBUG
+    org.springframework.transaction: DEBUG
+    org.springframework.amqp: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+  file:
+    name: logs/booking-service.log
+
+booking:
+  retry:
+    max-attempts: 3
+    delay: 100
+  cancellation:
+    hours-before-checkin: 24
+  pricing:
+    weekend-premium: 0.20
+    summer-premium: 0.15
+    winter-premium: 0.25
+    advance-booking-discount: 0.10
+    advance-booking-days: 30

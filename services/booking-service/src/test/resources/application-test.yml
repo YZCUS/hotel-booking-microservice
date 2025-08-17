@@ -1,0 +1,29 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    username: sa
+    password: 
+    driver-class-name: org.h2.Driver
+  
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+        format_sql: true
+  
+  redis:
+    host: localhost
+    port: 6370  # Different port for testing to avoid conflicts
+  
+  rabbitmq:
+    host: localhost
+    port: 5673  # Different port for testing
+
+logging:
+  level:
+    com.hotel.booking: DEBUG
+    org.springframework.retry: DEBUG
+    org.hibernate: DEBUG

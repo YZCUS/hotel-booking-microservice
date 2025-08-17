@@ -1,0 +1,172 @@
+version: '3.8'
+
+# Development overrides for docker-compose.yml
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  # PostgreSQL - Development configuration
+  postgres:
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: hotel_reservation
+      POSTGRES_USER: hotel_user
+      POSTGRES_PASSWORD: hotel_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d
+      - ./dev-data:/dev-data  # Development data scripts
+
+  # Redis - Development configuration
+  redis:
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass hotel_redis_pass
+
+  # RabbitMQ - Development configuration
+  rabbitmq:
+    ports:
+      - "5672:5672"
+      - "15672:15672"  # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: hotel_user
+      RABBITMQ_DEFAULT_PASS: hotel_pass
+
+  # Meilisearch - Development configuration
+  meilisearch:
+    ports:
+      - "7700:7700"
+    environment:
+      MEILI_ENV: development
+      MEILI_NO_ANALYTICS: true
+      MEILI_MASTER_KEY: masterKey123456789
+
+  # User Service - Development configuration
+  user-service:
+    ports:
+      - "8081:8081"
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/hotel_reservation
+      SPRING_DATASOURCE_USERNAME: hotel_user
+      SPRING_DATASOURCE_PASSWORD: hotel_password
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PASSWORD: hotel_redis_pass
+      JWT_SECRET: myVerySecureSecretKey123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz
+      SPRING_JPA_HIBERNATE_DDL_AUTO: validate
+      SPRING_JPA_PROPERTIES_HIBERNATE_DEFAULT_SCHEMA: user_svc
+      SPRING_JPA_SHOW_SQL: true
+      LOGGING_LEVEL_COM_HOTEL: DEBUG
+      LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_SECURITY: DEBUG
+    volumes:
+      - ./logs:/app/logs  # Mount logs directory
+
+  # Hotel Service - Development configuration
+  hotel-service:
+    ports:
+      - "8082:8082"
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/hotel_reservation
+      SPRING_DATASOURCE_USERNAME: hotel_user
+      SPRING_DATASOURCE_PASSWORD: hotel_password
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PASSWORD: hotel_redis_pass
+      SPRING_JPA_HIBERNATE_DDL_AUTO: validate
+      SPRING_JPA_PROPERTIES_HIBERNATE_DEFAULT_SCHEMA: hotel_svc
+      SPRING_JPA_SHOW_SQL: true
+      LOGGING_LEVEL_COM_HOTEL: DEBUG
+    volumes:
+      - ./logs:/app/logs
+
+  # Booking Service - Development configuration
+  booking-service:
+    ports:
+      - "8083:8083"
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/hotel_reservation
+      SPRING_DATASOURCE_USERNAME: hotel_user
+      SPRING_DATASOURCE_PASSWORD: hotel_password
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PASSWORD: hotel_redis_pass
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_USERNAME: hotel_user
+      SPRING_RABBITMQ_PASSWORD: hotel_pass
+      SPRING_JPA_HIBERNATE_DDL_AUTO: validate
+      SPRING_JPA_PROPERTIES_HIBERNATE_DEFAULT_SCHEMA: booking_svc
+      SPRING_JPA_SHOW_SQL: true
+      LOGGING_LEVEL_COM_HOTEL: DEBUG
+      LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_RETRY: DEBUG
+    volumes:
+      - ./logs:/app/logs
+
+  # Search Service - Development configuration
+  search-service:
+    ports:
+      - "8084:8084"
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      MEILISEARCH_HOST: http://meilisearch:7700
+      MEILISEARCH_API_KEY: masterKey123456789
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_USERNAME: hotel_user
+      SPRING_RABBITMQ_PASSWORD: hotel_pass
+      LOGGING_LEVEL_COM_HOTEL: DEBUG
+    volumes:
+      - ./logs:/app/logs
+
+  # Notification Service - Development configuration
+  notification-service:
+    ports:
+      - "8085:8085"
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_USERNAME: hotel_user
+      SPRING_RABBITMQ_PASSWORD: hotel_pass
+      SPRING_MAIL_HOST: smtp.gmail.com
+      SPRING_MAIL_PORT: 587
+      SPRING_MAIL_USERNAME: ${MAIL_USERNAME:-your-email@gmail.com}
+      SPRING_MAIL_PASSWORD: ${MAIL_PASSWORD:-your-app-password}
+      SPRING_MAIL_FROM: ${MAIL_FROM:-noreply@hotel.com}
+      LOGGING_LEVEL_COM_HOTEL: DEBUG
+      LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_MAIL: DEBUG
+    volumes:
+      - ./logs:/app/logs
+
+  # API Gateway - Development configuration
+  api-gateway:
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PASSWORD: hotel_redis_pass
+      JWT_SECRET: myVerySecureSecretKey123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz
+      CORS_ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://localhost:8080
+      LOGGING_LEVEL_COM_HOTEL: DEBUG
+      LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_CLOUD_GATEWAY: DEBUG
+      LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_SECURITY: DEBUG
+    volumes:
+      - ./logs:/app/logs
+
+  # Monitoring - Development configuration
+  prometheus:
+    ports:
+      - "9090:9090"
+
+  grafana:
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin123
+      GF_SECURITY_ALLOW_EMBEDDING: true
+
+# Development volumes
+volumes:
+  logs:
+    driver: local
+  dev-data:
+    driver: local

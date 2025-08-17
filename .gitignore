@@ -1,0 +1,87 @@
+*.md
+!README.md
+
+# Gradle
+.gradle/
+build/
+**/build/
+
+# IDE files
+.idea/
+*.iml
+.project
+.classpath
+.settings/
+
+# Logs and temp
+logs/
+*.log
+*.tmp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build outputs
+**/bin/
+**/out/
+# OS / Editor
+.DS_Store
+Thumbs.db
+
+# Environment files (keep example tracked)
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+**/logs/
+*.log
+
+# Gradle / Build outputs
+.gradle/
+build/
+**/build/
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
+
+# Java / Maven (if any)
+target/
+
+# IDEs
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.classpath
+.project
+.settings/
+.sts4-cache
+bin/
+out/
+
+# NetBeans
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+# Docker / local overrides & artifacts
+Dockerfile.*.local
+docker-compose.override.yml
+backup_*.sql
+
+# Potential local data artifacts
+*.pid
+*.rdb
+dump.rdb
+pgdata/
+postgresql.conf
+pg_hba.conf
+
+# AI Memory / Development files
+CLAUDE.md
+HELP.md

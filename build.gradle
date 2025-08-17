@@ -1,0 +1,17 @@
+plugins {
+	id 'base'
+}
+
+group = 'com.hotelreservation'
+version = '0.0.1-SNAPSHOT'
+description = 'Parent project for hotel booking microservices'
+
+// aggregator only; no Java toolchain or source set declared at root
+
+// no configurations or dependencies at root
+
+// repositories are defined in subprojects under services/build.gradle
+
+// no dependencies at root; all dependencies live in subprojects
+
+// root has no tests; lifecycle tasks come from 'base' plugin

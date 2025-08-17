@@ -1,0 +1,219 @@
+package com.hotel.notification.service;
+
+import com.hotel.notification.dto.BookingConfirmationData;
+import com.hotel.notification.dto.HotelInfo;
+import com.hotel.notification.dto.UserInfo;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.web.reactive.function.client.WebClient;
+
+import java.time.LocalDateTime;
+import java.util.UUID;
+
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class NotificationService {
+    
+    private final EmailService emailService;
+    private final WebClient.Builder webClientBuilder;
+    
+    public void sendBookingConfirmation(BookingCreatedEvent event) {
+        try {
+            // Get user and hotel information
+            UserInfo user = getUserInfo(event.getUserId());
+            HotelInfo hotel = getHotelInfo(event.getRoomTypeId());
+            
+            BookingConfirmationData data = BookingConfirmationData.builder()
+                .bookingId(event.getBookingId())
+                .userName(user.getFullName())
+                .userEmail(user.getEmail())
+                .hotelName(hotel.getName())
+                .hotelAddress(hotel.getAddress())
+                .checkInDate(event.getCheckInDate())
+                .checkOutDate(event.getCheckOutDate())
+                .guests(event.getGuests())
+                .totalPrice(event.getTotalPrice())
+                .bookingTime(event.getCreatedAt())
+                .hotelPhone(hotel.getPhoneNumber())
+                .hotelEmail(hotel.getEmail())
+                .cancellationPolicy("Free cancellation up to 24 hours before check-in")
+                .build();
+            
+            emailService.sendBookingConfirmationEmail(data);
+            log.info("Booking confirmation notification sent for booking: {}", event.getBookingId());
+            
+        } catch (Exception e) {
+            log.error("Failed to send booking confirmation notification for booking: {}", event.getBookingId(), e);
+            throw new RuntimeException("Failed to send booking confirmation", e);
+        }
+    }
+    
+    public void sendCancellationConfirmation(BookingCancelledEvent event) {
+        try {
+            // Get user and hotel information
+            UserInfo user = getUserInfo(event.getUserId());
+            HotelInfo hotel = getHotelInfo(event.getRoomTypeId());
+            
+            BookingConfirmationData data = BookingConfirmationData.builder()
+                .bookingId(event.getBookingId())
+                .userName(user.getFullName())
+                .userEmail(user.getEmail())
+                .hotelName(hotel.getName())
+                .hotelAddress(hotel.getAddress())
+                .checkInDate(event.getCheckInDate())
+                .checkOutDate(event.getCheckOutDate())
+                .totalPrice(event.getTotalPrice())
+                .build();
+            
+            emailService.sendBookingCancellationEmail(data);
+            log.info("Booking cancellation notification sent for booking: {}", event.getBookingId());
+            
+        } catch (Exception e) {
+            log.error("Failed to send booking cancellation notification for booking: {}", event.getBookingId(), e);
+            throw new RuntimeException("Failed to send cancellation confirmation", e);
+        }
+    }
+    
+    public void sendWelcomeMessage(UserRegisteredEvent event) {
+        try {
+            emailService.sendWelcomeEmail(event.getEmail(), event.getFullName());
+            log.info("Welcome notification sent to user: {}", event.getUserId());
+            
+        } catch (Exception e) {
+            log.error("Failed to send welcome notification to user: {}", event.getUserId(), e);
+        }
+    }
+    
+    private UserInfo getUserInfo(UUID userId) {
+        try {
+            WebClient webClient = webClientBuilder.build();
+            
+            return webClient.get()
+                .uri("http://user-service:8081/api/v1/users/{userId}", userId)
+                .retrieve()
+                .bodyToMono(UserInfo.class)
+                .block();
+                
+        } catch (Exception e) {
+            log.error("Failed to get user info for user: {}", userId, e);
+            // Return default user info
+            return UserInfo.builder()
+                .id(userId)
+                .email("guest@example.com")
+                .fullName("Guest User")
+                .build();
+        }
+    }
+    
+    private HotelInfo getHotelInfo(UUID roomTypeId) {
+        try {
+            WebClient webClient = webClientBuilder.build();
+            
+            // Get room type info which includes hotel details
+            return webClient.get()
+                .uri("http://hotel-service:8082/api/v1/hotels/rooms/{roomTypeId}/hotel", roomTypeId)
+                .retrieve()
+                .bodyToMono(HotelInfo.class)
+                .block();
+                
+        } catch (Exception e) {
+            log.error("Failed to get hotel info for room type: {}", roomTypeId, e);
+            // Return default hotel info
+            return HotelInfo.builder()
+                .id(UUID.randomUUID())
+                .name("Hotel")
+                .address("Address not available")
+                .phoneNumber("Contact hotel directly")
+                .email("info@hotel.com")
+                .build();
+        }
+    }
+    
+    // Event classes - these would typically be in a shared library
+    public static class BookingCreatedEvent {
+        private UUID bookingId;
+        private UUID userId;
+        private UUID roomTypeId;
+        private java.time.LocalDate checkInDate;
+        private java.time.LocalDate checkOutDate;
+        private Integer guests;
+        private java.math.BigDecimal totalPrice;
+        private LocalDateTime createdAt;
+        
+        // Getters and setters
+        public UUID getBookingId() { return bookingId; }
+        public void setBookingId(UUID bookingId) { this.bookingId = bookingId; }
+        public UUID getUserId() { return userId; }
+        public void setUserId(UUID userId) { this.userId = userId; }
+        public UUID getRoomTypeId() { return roomTypeId; }
+        public void setRoomTypeId(UUID roomTypeId) { this.roomTypeId = roomTypeId; }
+        public java.time.LocalDate getCheckInDate() { return checkInDate; }
+        public void setCheckInDate(java.time.LocalDate checkInDate) { this.checkInDate = checkInDate; }
+        public java.time.LocalDate getCheckOutDate() { return checkOutDate; }
+        public void setCheckOutDate(java.time.LocalDate checkOutDate) { this.checkOutDate = checkOutDate; }
+        public Integer getGuests() { return guests; }
+        public void setGuests(Integer guests) { this.guests = guests; }
+        public java.math.BigDecimal getTotalPrice() { return totalPrice; }
+        public void setTotalPrice(java.math.BigDecimal totalPrice) { this.totalPrice = totalPrice; }
+        public LocalDateTime getCreatedAt() { return createdAt; }
+        public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
+    }
+    
+    public static class BookingCancelledEvent {
+        private UUID bookingId;
+        private UUID userId;
+        private UUID roomTypeId;
+        private java.time.LocalDate checkInDate;
+        private java.time.LocalDate checkOutDate;
+        private java.math.BigDecimal totalPrice;
+        private LocalDateTime cancelledAt;
+        private String reason;
+        
+        // Getters and setters
+        public UUID getBookingId() { return bookingId; }
+        public void setBookingId(UUID bookingId) { this.bookingId = bookingId; }
+        public UUID getUserId() { return userId; }
+        public void setUserId(UUID userId) { this.userId = userId; }
+        public UUID getRoomTypeId() { return roomTypeId; }
+        public void setRoomTypeId(UUID roomTypeId) { this.roomTypeId = roomTypeId; }
+        public java.time.LocalDate getCheckInDate() { return checkInDate; }
+        public void setCheckInDate(java.time.LocalDate checkInDate) { this.checkInDate = checkInDate; }
+        public java.time.LocalDate getCheckOutDate() { return checkOutDate; }
+        public void setCheckOutDate(java.time.LocalDate checkOutDate) { this.checkOutDate = checkOutDate; }
+        public java.math.BigDecimal getTotalPrice() { return totalPrice; }
+        public void setTotalPrice(java.math.BigDecimal totalPrice) { this.totalPrice = totalPrice; }
+        public LocalDateTime getCancelledAt() { return cancelledAt; }
+        public void setCancelledAt(LocalDateTime cancelledAt) { this.cancelledAt = cancelledAt; }
+        public String getReason() { return reason; }
+        public void setReason(String reason) { this.reason = reason; }
+    }
+    
+    public static class UserRegisteredEvent {
+        private UUID userId;
+        private String email;
+        private String firstName;
+        private String lastName;
+        private String fullName;
+        private LocalDateTime registeredAt;
+        
+        // Getters and setters
+        public UUID getUserId() { return userId; }
+        public void setUserId(UUID userId) { this.userId = userId; }
+        public String getEmail() { return email; }
+        public void setEmail(String email) { this.email = email; }
+        public String getFirstName() { return firstName; }
+        public void setFirstName(String firstName) { this.firstName = firstName; }
+        public String getLastName() { return lastName; }
+        public void setLastName(String lastName) { this.lastName = lastName; }
+        public String getFullName() { 
+            if (fullName != null) return fullName;
+            if (firstName != null && lastName != null) return firstName + " " + lastName;
+            return firstName != null ? firstName : "Guest";
+        }
+        public void setFullName(String fullName) { this.fullName = fullName; }
+        public LocalDateTime getRegisteredAt() { return registeredAt; }
+        public void setRegisteredAt(LocalDateTime registeredAt) { this.registeredAt = registeredAt; }
+    }
+}

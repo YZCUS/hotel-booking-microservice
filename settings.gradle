@@ -1,0 +1,9 @@
+rootProject.name = 'hotel-booking-microservices'
+
+// Include services subprojects
+include 'services:user-service'
+include 'services:hotel-service'
+include 'services:booking-service'
+include 'services:search-service'
+include 'services:notification-service'
+include 'services:api-gateway'
