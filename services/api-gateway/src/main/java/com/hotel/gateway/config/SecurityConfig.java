@@ -21,7 +21,7 @@ public class SecurityConfig {
             .authorizeExchange(exchanges -> exchanges
                 // Public endpoints
                 .pathMatchers(
-                    "/api/v1/auth/**",
+                    "/api/v1/auth/**",  // Auth is public
                     "/api/v1/hotels/**",  // Hotel browsing is public
                     "/api/v1/search/**",  // Search is public
                     "/api/v1/inventory/check-availability", // Availability check is public

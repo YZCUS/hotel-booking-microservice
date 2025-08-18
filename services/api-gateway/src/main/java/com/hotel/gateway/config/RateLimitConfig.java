@@ -14,15 +14,16 @@ public class RateLimitConfig {
     public ReactiveRedisTemplate<String, String> reactiveRedisTemplate(
             ReactiveRedisConnectionFactory connectionFactory) {
         
+        StringRedisSerializer stringSerializer = new StringRedisSerializer();
+        
         RedisSerializationContext<String, String> serializationContext = RedisSerializationContext
-            .<String, String>newSerializationContext()
-            .key(new StringRedisSerializer())
-            .value(new StringRedisSerializer())
+            .<String, String>newSerializationContext(stringSerializer)
+            .key(stringSerializer)
+            .value(stringSerializer)
+            .hashKey(stringSerializer)
+            .hashValue(stringSerializer)
             .build();
         
-        ReactiveRedisTemplate<String, String> template = new ReactiveRedisTemplate<>(
-            connectionFactory, serializationContext);
-        
-        return template;
+        return new ReactiveRedisTemplate<>(connectionFactory, serializationContext);
     }
 }

@@ -2,6 +2,7 @@ package com.hotel.gateway.filter;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
@@ -19,11 +20,14 @@ import java.time.Duration;
 import java.util.List;
 
 @Component
-@RequiredArgsConstructor
 @Slf4j
 public class RateLimitFilter implements GlobalFilter, Ordered {
     
     private final ReactiveRedisTemplate<String, String> redisTemplate;
+    
+    public RateLimitFilter(@Qualifier("reactiveRedisTemplate") ReactiveRedisTemplate<String, String> redisTemplate) {
+        this.redisTemplate = redisTemplate;
+    }
     
     private static final int REQUESTS_PER_MINUTE = 60;
     private static final int AUTHENTICATED_REQUESTS_PER_MINUTE = 120;
