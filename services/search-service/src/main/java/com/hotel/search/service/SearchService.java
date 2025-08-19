@@ -29,7 +29,25 @@ public class SearchService {
             Index index = meilisearchClient.index(IndexService.HOTEL_INDEX);
             
             String query = request.getQuery() != null ? request.getQuery() : "";
-            SearchResult result = index.search(query);
+            List<String> filters = buildFilters(request);
+            
+            // Create Meilisearch SearchRequest with filters applied
+            com.meilisearch.sdk.SearchRequest searchRequest = new com.meilisearch.sdk.SearchRequest(query);
+            
+            if (!filters.isEmpty()) {
+                searchRequest.setFilter(String.join(" AND ", filters));
+                log.debug("Applied filters: {}", filters);
+            }
+            
+            // Apply pagination
+            if (request.getOffset() != null) {
+                searchRequest.setOffset(request.getOffset());
+            }
+            if (request.getLimit() != null) {
+                searchRequest.setLimit(request.getLimit());
+            }
+            
+            SearchResult result = index.search(searchRequest);
             
             List<HotelDocument> hotels = new ArrayList<>();
             if (result.getHits() != null && !result.getHits().isEmpty()) {
@@ -47,9 +65,6 @@ public class SearchService {
             
             long total = (long) result.getEstimatedTotalHits();
             long processingMs = (long) result.getProcessingTimeMs();
-            
-            // Note: filters/sort are currently not applied due to API changes; kept for response transparency
-            List<String> filters = buildFilters(request);
             
             return SearchResponse.builder()
                 .hotels(hotels)

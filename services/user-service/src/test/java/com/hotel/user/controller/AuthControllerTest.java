@@ -89,7 +89,7 @@ class AuthControllerTest {
                 .with(csrf())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
-                .andExpected(status().isOk())
+                .andExpect(status().isOk())
                 .andExpect(jsonPath("$.token").value("jwt-token"))
                 .andExpect(jsonPath("$.email").value("test@example.com"));
     }

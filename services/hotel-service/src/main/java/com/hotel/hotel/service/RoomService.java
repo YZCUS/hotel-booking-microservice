@@ -27,6 +27,7 @@ public class RoomService {
     
     private final RoomTypeRepository roomTypeRepository;
     private final HotelRepository hotelRepository;
+    private final InventoryService inventoryService;
     
     public List<RoomTypeResponse> getRoomsByHotel(UUID hotelId) {
         log.info("Getting rooms for hotel: {}", hotelId);
@@ -147,6 +148,9 @@ public class RoomService {
     }
     
     private RoomTypeResponse mapToResponse(RoomType roomType) {
+        // Get real-time availability for today
+        Integer availableRooms = inventoryService.getAvailableRoomsForToday(roomType.getId());
+        
         return RoomTypeResponse.builder()
                 .id(roomType.getId())
                 .hotelId(roomType.getHotel().getId())
@@ -157,8 +161,8 @@ public class RoomService {
                 .pricePerNight(roomType.getPricePerNight())
                 .totalInventory(roomType.getTotalInventory())
                 .createdAt(roomType.getCreatedAt())
-                .availableRooms(roomType.getTotalInventory()) // Should be fetched from inventory service
-                .isAvailable(roomType.getTotalInventory() > 0)
+                .availableRooms(availableRooms)
+                .isAvailable(availableRooms != null && availableRooms > 0)
                 .build();
     }
 }

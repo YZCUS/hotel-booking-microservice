@@ -1,8 +1,11 @@
 package com.hotel.booking.service;
 
+import com.hotel.booking.dto.RoomTypeResponse;
+import com.hotel.booking.exception.ServiceCommunicationException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
 import java.math.BigDecimal;
@@ -49,18 +52,30 @@ public class PricingService {
             // Call hotel service to get room type details
             String url = "http://hotel-service:8082/api/v1/hotels/rooms/" + roomTypeId;
             
-            // For now, return a default price until hotel service integration is complete
-            // In real implementation, this would make an HTTP call to hotel service
-            log.debug("Would call hotel service for room type price: {}", roomTypeId);
+            log.debug("Calling hotel service for room type price: {}", url);
             
-            // Default pricing logic - this should be replaced with actual service call
-            return BigDecimal.valueOf(100.00); // Default $100 per night
+            RoomTypeResponse roomType = restTemplate.getForObject(url, RoomTypeResponse.class);
             
+            if (roomType == null || roomType.getPricePerNight() == null) {
+                log.warn("No room type found or price is null for roomTypeId: {}", roomTypeId);
+                return getDefaultPrice();
+            }
+            
+            log.debug("Retrieved price {} for room type {}", roomType.getPricePerNight(), roomTypeId);
+            return roomType.getPricePerNight();
+            
+        } catch (RestClientException e) {
+            log.error("REST client error fetching room type price for: {}", roomTypeId, e);
+            throw new ServiceCommunicationException("Failed to fetch room price from hotel service", e);
         } catch (Exception e) {
-            log.error("Error fetching room type price for: {}", roomTypeId, e);
-            // Return default price as fallback
-            return BigDecimal.valueOf(100.00);
+            log.error("Unexpected error fetching room type price for: {}", roomTypeId, e);
+            throw new ServiceCommunicationException("Unexpected error occurred while fetching room price", e);
         }
+    }
+    
+    private BigDecimal getDefaultPrice() {
+        log.warn("Using default price as fallback");
+        return BigDecimal.valueOf(100.00); // Default $100 per night
     }
     
     private BigDecimal applyDynamicPricing(BigDecimal basePrice, LocalDate checkIn, LocalDate checkOut, UUID roomTypeId) {
