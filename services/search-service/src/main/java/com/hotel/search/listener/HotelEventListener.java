@@ -1,5 +1,6 @@
 package com.hotel.search.listener;
 
+import com.hotel.search.config.RabbitMQConfig;
 import com.hotel.search.model.HotelDocument;
 import com.hotel.search.service.IndexService;
 import lombok.RequiredArgsConstructor;
@@ -18,7 +19,7 @@ public class HotelEventListener {
     
     private final IndexService indexService;
     
-    @RabbitListener(queues = "hotel.created.queue")
+    @RabbitListener(queues = RabbitMQConfig.HOTEL_CREATED_QUEUE)
     public void handleHotelCreated(HotelCreatedEvent event) {
         log.info("Received hotel created event: {}", event.getHotelId());
         
@@ -31,7 +32,7 @@ public class HotelEventListener {
         }
     }
     
-    @RabbitListener(queues = "hotel.updated.queue")
+    @RabbitListener(queues = RabbitMQConfig.HOTEL_UPDATED_QUEUE)
     public void handleHotelUpdated(HotelUpdatedEvent event) {
         log.info("Received hotel updated event: {}", event.getHotelId());
         
@@ -44,7 +45,7 @@ public class HotelEventListener {
         }
     }
     
-    @RabbitListener(queues = "hotel.deleted.queue")
+    @RabbitListener(queues = RabbitMQConfig.HOTEL_DELETED_QUEUE)
     public void handleHotelDeleted(HotelDeletedEvent event) {
         log.info("Received hotel deleted event: {}", event.getHotelId());
         
