@@ -2,12 +2,12 @@ package com.hotel.search.config;
 
 import org.springframework.amqp.core.Queue;
 import org.springframework.amqp.core.QueueBuilder;
-import org.springframework.amqp.rabbit.annotation.EnableRabbitMQ;
+import org.springframework.amqp.rabbit.annotation.EnableRabbit;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 @Configuration
-@EnableRabbitMQ
+@EnableRabbit
 public class RabbitMQConfig {
     
     public static final String HOTEL_CREATED_QUEUE = "hotel.created.queue";
