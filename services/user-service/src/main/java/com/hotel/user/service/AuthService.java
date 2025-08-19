@@ -51,6 +51,7 @@ public class AuthService {
         
         return JwtResponse.builder()
                 .token(token)
+                .type("Bearer")
                 .userId(saved.getId())
                 .email(saved.getEmail())
                 .build();
@@ -80,6 +81,7 @@ public class AuthService {
         
         return JwtResponse.builder()
                 .token(token)
+                .type("Bearer")
                 .userId(user.getId())
                 .email(user.getEmail())
                 .build();

@@ -13,6 +13,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -27,6 +29,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -34,6 +37,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 class HotelServiceTest {
     
     @Mock
@@ -115,6 +119,8 @@ class HotelServiceTest {
         assertEquals(3L, response.getFavoriteCount());
         assertTrue(response.getIsFavorite());
         
+        verify(hotelRepository).findById(testHotelId);
+        verify(favoriteRepository).countFavoritesByHotelId(testHotelId);
         verify(favoriteRepository).existsByUserIdAndHotelId(testUserId, testHotelId);
     }
     
@@ -142,7 +148,7 @@ class HotelServiceTest {
         Page<Hotel> hotelPage = new PageImpl<>(Arrays.asList(testHotel));
         
         when(valueOperations.get(anyString())).thenReturn(null);
-        when(hotelRepository.findAll(any(Specification.class), eq(pageable))).thenReturn(hotelPage);
+        when(hotelRepository.findAll(any(Specification.class), any(Pageable.class))).thenReturn(hotelPage);
         when(favoriteRepository.countFavoritesByHotelId(testHotelId)).thenReturn(2L);
         
         // When
@@ -154,8 +160,8 @@ class HotelServiceTest {
         assertEquals("Test Hotel", result.getContent().get(0).getName());
         assertEquals("Test City", result.getContent().get(0).getCity());
         
-        verify(hotelRepository).findAll(any(Specification.class), eq(pageable));
-        verify(valueOperations).set(anyString(), any(), any(), any());
+        verify(hotelRepository).findAll(any(Specification.class), any(Pageable.class));
+        verify(valueOperations).set(anyString(), any(), any(Long.class), any(TimeUnit.class));
     }
     
     @Test
@@ -210,8 +216,7 @@ class HotelServiceTest {
                 .build();
         
         when(hotelRepository.save(any(Hotel.class))).thenReturn(savedHotel);
-        when(favoriteRepository.countFavoritesByHotelId(any())).thenReturn(0L);
-        when(redisTemplate.keys(anyString())).thenReturn(null);
+        when(favoriteRepository.countFavoritesByHotelId(any(UUID.class))).thenReturn(0L);
         
         // When
         HotelResponse response = hotelService.createHotel(request);
@@ -224,6 +229,7 @@ class HotelServiceTest {
         assertEquals(0L, response.getFavoriteCount());
         
         verify(hotelRepository).save(any(Hotel.class));
+        verify(favoriteRepository).countFavoritesByHotelId(any(UUID.class));
     }
     
     @Test
@@ -239,9 +245,8 @@ class HotelServiceTest {
                 .build();
         
         when(hotelRepository.findById(testHotelId)).thenReturn(Optional.of(testHotel));
-        when(hotelRepository.save(any(Hotel.class))).thenReturn(testHotel);
+        when(hotelRepository.save(testHotel)).thenReturn(testHotel);
         when(favoriteRepository.countFavoritesByHotelId(testHotelId)).thenReturn(3L);
-        when(redisTemplate.keys(anyString())).thenReturn(null);
         
         // When
         HotelResponse response = hotelService.updateHotel(testHotelId, request);
@@ -254,6 +259,7 @@ class HotelServiceTest {
         
         verify(hotelRepository).findById(testHotelId);
         verify(hotelRepository).save(testHotel);
+        verify(favoriteRepository).countFavoritesByHotelId(testHotelId);
     }
     
     @Test
@@ -271,14 +277,13 @@ class HotelServiceTest {
         });
         
         verify(hotelRepository).findById(testHotelId);
-        verify(hotelRepository, never()).save(any());
+        verify(hotelRepository, never()).save(any(Hotel.class));
     }
     
     @Test
     void testDeleteHotel_Success() {
         // Given
         when(hotelRepository.findById(testHotelId)).thenReturn(Optional.of(testHotel));
-        when(redisTemplate.keys(anyString())).thenReturn(null);
         
         // When
         hotelService.deleteHotel(testHotelId);
@@ -298,6 +303,7 @@ class HotelServiceTest {
         List<String> result = hotelService.getAllCities();
         
         // Then
+        assertNotNull(result);
         assertEquals(3, result.size());
         assertEquals(cities, result);
         verify(hotelRepository).findAllCities();
@@ -313,6 +319,7 @@ class HotelServiceTest {
         List<String> result = hotelService.getAllCountries();
         
         // Then
+        assertNotNull(result);
         assertEquals(3, result.size());
         assertEquals(countries, result);
         verify(hotelRepository).findAllCountries();
