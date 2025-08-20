@@ -3,8 +3,8 @@ package com.hotel.search.health;
 import com.meilisearch.sdk.Client;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.actuator.health.Health;
-import org.springframework.boot.actuator.health.HealthIndicator;
+import org.springframework.boot.actuate.health.Health;
+import org.springframework.boot.actuate.health.HealthIndicator;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -22,7 +22,7 @@ public class MeilisearchHealthIndicator implements HealthIndicator {
             
             return Health.up()
                 .withDetail("meilisearch", "Available")
-                .withDetail("version", version.getPkgVersion())
+                .withDetail("version", version)
                 .withDetail("status", "Connected")
                 .build();
                 
