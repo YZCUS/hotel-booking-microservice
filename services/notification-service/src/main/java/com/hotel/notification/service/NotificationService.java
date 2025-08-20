@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import com.hotel.notification.exception.ServiceCommunicationException;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -90,20 +91,23 @@ public class NotificationService {
         try {
             WebClient webClient = webClientBuilder.build();
             
-            return webClient.get()
+            UserInfo userInfo = webClient.get()
                 .uri("http://user-service:8081/api/v1/users/{userId}", userId)
                 .retrieve()
                 .bodyToMono(UserInfo.class)
                 .block();
+            
+            if (userInfo == null || userInfo.getEmail() == null || userInfo.getEmail().trim().isEmpty()) {
+                log.error("Invalid user data received for user: {}", userId);
+                throw new ServiceCommunicationException("Cannot fetch valid user details for notification");
+            }
+            
+            return userInfo;
                 
         } catch (Exception e) {
             log.error("Failed to get user info for user: {}", userId, e);
-            // Return default user info
-            return UserInfo.builder()
-                .id(userId)
-                .email("guest@example.com")
-                .fullName("Guest User")
-                .build();
+            // Don't send email with default data - throw exception instead
+            throw new ServiceCommunicationException("Cannot fetch user details for notification");
         }
     }
     
@@ -112,22 +116,23 @@ public class NotificationService {
             WebClient webClient = webClientBuilder.build();
             
             // Get room type info which includes hotel details
-            return webClient.get()
+            HotelInfo hotelInfo = webClient.get()
                 .uri("http://hotel-service:8082/api/v1/hotels/rooms/{roomTypeId}/hotel", roomTypeId)
                 .retrieve()
                 .bodyToMono(HotelInfo.class)
                 .block();
+            
+            if (hotelInfo == null || hotelInfo.getName() == null || hotelInfo.getName().trim().isEmpty()) {
+                log.error("Invalid hotel data received for room type: {}", roomTypeId);
+                throw new ServiceCommunicationException("Cannot fetch valid hotel details for notification");
+            }
+            
+            return hotelInfo;
                 
         } catch (Exception e) {
             log.error("Failed to get hotel info for room type: {}", roomTypeId, e);
-            // Return default hotel info
-            return HotelInfo.builder()
-                .id(UUID.randomUUID())
-                .name("Hotel")
-                .address("Address not available")
-                .phoneNumber("Contact hotel directly")
-                .email("info@hotel.com")
-                .build();
+            // Don't send email with default data - throw exception instead
+            throw new ServiceCommunicationException("Cannot fetch hotel details for notification");
         }
     }
     

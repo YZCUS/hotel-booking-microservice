@@ -21,11 +21,19 @@ public interface RoomInventoryRepository extends JpaRepository<RoomInventory, UU
     List<RoomInventory> findByRoomTypeIdAndDateBetween(
             UUID roomTypeId, LocalDate startDate, LocalDate endDate);
     
-    @Lock(LockModeType.OPTIMISTIC)
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT ri FROM RoomInventory ri WHERE ri.roomTypeId = :roomTypeId AND ri.date = :date")
     Optional<RoomInventory> findByRoomTypeIdAndDateWithLock(
             @Param("roomTypeId") UUID roomTypeId, 
             @Param("date") LocalDate date);
+    
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT ri FROM RoomInventory ri WHERE ri.roomTypeId = :roomTypeId " +
+           "AND ri.date BETWEEN :startDate AND :endDate ORDER BY ri.date")
+    List<RoomInventory> findByRoomTypeIdAndDateRangeForUpdate(
+            @Param("roomTypeId") UUID roomTypeId,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate);
     
     @Query("SELECT ri FROM RoomInventory ri WHERE ri.roomTypeId = :roomTypeId " +
            "AND ri.date BETWEEN :startDate AND :endDate " +

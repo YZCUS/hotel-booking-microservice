@@ -20,6 +20,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -46,6 +47,7 @@ public class BookingService {
         maxAttempts = MAX_RETRY_ATTEMPTS,
         backoff = @Backoff(delay = 100, multiplier = 2)
     )
+    @Transactional(rollbackFor = Exception.class, isolation = Isolation.READ_COMMITTED)
     public BookingResponse createBooking(BookingRequest request) {
         log.info("Creating booking for user: {} from {} to {}", 
             request.getUserId(), request.getCheckInDate(), request.getCheckOutDate());

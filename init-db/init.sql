@@ -46,20 +46,20 @@ CREATE TABLE IF NOT EXISTS hotel_svc.room_types (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Room inventory (booking-service) - references hotel_svc.room_types
+-- Room inventory (booking-service) - NO cross-service foreign key
 CREATE TABLE IF NOT EXISTS booking_svc.room_inventory (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    room_type_id UUID REFERENCES hotel_svc.room_types(id) ON DELETE CASCADE,
+    room_type_id UUID NOT NULL, -- Removed FK constraint - validate in application
     date DATE NOT NULL,
     available_rooms INTEGER NOT NULL,
     UNIQUE(room_type_id, date)
 );
 
--- Bookings (booking-service) - references user_svc.users and hotel_svc.room_types
+-- Bookings (booking-service) - NO cross-service foreign keys
 CREATE TABLE IF NOT EXISTS booking_svc.bookings (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES user_svc.users(id),
-    room_type_id UUID REFERENCES hotel_svc.room_types(id),
+    user_id UUID NOT NULL, -- Removed FK constraint - validate in application
+    room_type_id UUID NOT NULL, -- Removed FK constraint - validate in application
     check_in_date DATE NOT NULL,
     check_out_date DATE NOT NULL,
     guests INTEGER NOT NULL,
@@ -71,18 +71,18 @@ CREATE TABLE IF NOT EXISTS booking_svc.bookings (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- User favorites (hotel-service) - cross schema refs
+-- User favorites (hotel-service) - NO cross-service foreign key
 CREATE TABLE IF NOT EXISTS hotel_svc.user_favorites (
-    user_id UUID REFERENCES user_svc.users(id) ON DELETE CASCADE,
-    hotel_id UUID REFERENCES hotel_svc.hotels(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL, -- Removed FK constraint - validate in application
+    hotel_id UUID REFERENCES hotel_svc.hotels(id) ON DELETE CASCADE, -- Keep this FK as it's same service
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (user_id, hotel_id)
 );
 
--- Search history (search-service)
+-- Search history (search-service) - NO cross-service foreign key
 CREATE TABLE IF NOT EXISTS search_svc.search_history (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES user_svc.users(id) ON DELETE SET NULL,
+    user_id UUID, -- Removed FK constraint - validate in application (nullable for anonymous)
     search_query TEXT,
     search_filters JSONB,
     results_count INTEGER,

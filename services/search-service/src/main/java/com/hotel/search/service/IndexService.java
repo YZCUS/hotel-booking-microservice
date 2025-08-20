@@ -34,106 +34,128 @@ public class IndexService {
     @PostConstruct
     public void initializeIndex() {
         try {
-            // Create or get the index
-            Index index;
+            // Check if index exists first
+            boolean indexExists = false;
+            Index index = null;
+            
             try {
                 index = meilisearchClient.getIndex(HOTEL_INDEX);
-                log.info("Index '{}' already exists", HOTEL_INDEX);
+                // Try to get settings to verify index is fully accessible
+                index.getSettings();
+                indexExists = true;
+                log.info("Index '{}' already exists and is accessible", HOTEL_INDEX);
             } catch (Exception e) {
-                meilisearchClient.createIndex(HOTEL_INDEX, "id");
-                index = meilisearchClient.getIndex(HOTEL_INDEX);
-                log.info("Created new index '{}'", HOTEL_INDEX);
+                log.info("Index '{}' does not exist or is not accessible, creating new index", HOTEL_INDEX);
+                indexExists = false;
             }
             
-            // Configure index settings
-            Settings settings = new Settings();
+            if (!indexExists) {
+                try {
+                    meilisearchClient.createIndex(HOTEL_INDEX, "id");
+                    index = meilisearchClient.getIndex(HOTEL_INDEX);
+                    log.info("Successfully created new index '{}'", HOTEL_INDEX);
+                } catch (Exception e) {
+                    log.error("Failed to create index '{}'", HOTEL_INDEX, e);
+                    return; // Exit if we can't create the index
+                }
+            }
             
-            // Searchable attributes (fields that can be searched)
-            settings.setSearchableAttributes(new String[]{
-                "name",
-                "description", 
-                "city",
-                "country",
-                "amenities",
-                "address"
-            });
-            
-            // Displayed attributes (fields returned in search results)
-            settings.setDisplayedAttributes(new String[]{
-                "id",
-                "name",
-                "description",
-                "city",
-                "country",
-                "address",
-                "starRating",
-                "minPrice",
-                "maxPrice",
-                "amenities",
-                "latitude",
-                "longitude",
-                "imageUrls",
-                "totalRooms",
-                "availableRooms",
-                "averageRating",
-                "reviewCount",
-                "isActive",
-                "_geo"
-            });
-            
-            // Filterable attributes (fields that can be filtered)
-            settings.setFilterableAttributes(new String[]{
-                "city",
-                "country",
-                "starRating",
-                "minPrice",
-                "maxPrice",
-                "amenities",
-                "isActive",
-                "averageRating",
-                "reviewCount",
-                "_geo"  // Enable geo filtering
-            });
-            
-            // Sortable attributes (fields that can be sorted)
-            settings.setSortableAttributes(new String[]{
-                "starRating",
-                "minPrice",
-                "maxPrice",
-                "averageRating",
-                "reviewCount",
-                "name",
-                "_geo"  // Enable geo sorting (distance)
-            });
-            
-            // Ranking rules (order matters!)
-            settings.setRankingRules(new String[]{
-                "words",        // Number of words matching
-                "typo",         // Typo tolerance
-                "proximity",    // Proximity of words to each other
-                "attribute",    // Attribute order importance
-                "sort",         // Custom sorting
-                "exactness"     // Exact match bonus
-            });
-            
-            // Configure synonyms for better search experience (simplified for SDK 0.11.1)
-            HashMap<String, String[]> synonyms = new HashMap<>();
-            synonyms.put("hotel", new String[]{"accommodation", "lodge", "inn", "resort", "motel"});
-            synonyms.put("luxury", new String[]{"premium", "deluxe", "high-end", "upscale", "5-star"});
-            synonyms.put("budget", new String[]{"cheap", "affordable", "economic", "value", "low-cost"});
-            synonyms.put("wifi", new String[]{"wi-fi", "internet", "wireless", "connection"});
-            synonyms.put("pool", new String[]{"swimming pool", "swim", "aquatic"});
-            synonyms.put("gym", new String[]{"fitness", "workout", "exercise", "fitness center"});
-            synonyms.put("restaurant", new String[]{"dining", "food", "cuisine", "eatery"});
-            synonyms.put("parking", new String[]{"car park", "garage", "valet"});
-            
-            settings.setSynonyms(synonyms);
-            
-            // Note: TypoTolerance configuration not available in SDK 0.11.1
-            log.debug("Advanced typo tolerance configuration skipped for SDK 0.11.1 compatibility");
-            
-            // Apply settings to index
-            index.updateSettings(settings);
+            // Only configure settings for newly created index or if settings need update
+            if (!indexExists || shouldUpdateSettings(index)) {
+                log.info("Configuring index settings for '{}'", HOTEL_INDEX);
+                
+                Settings settings = new Settings();
+                
+                // Searchable attributes (fields that can be searched)
+                settings.setSearchableAttributes(new String[]{
+                    "name",
+                    "description", 
+                    "city",
+                    "country",
+                    "amenities",
+                    "address"
+                });
+                
+                // Displayed attributes (fields returned in search results)
+                settings.setDisplayedAttributes(new String[]{
+                    "id",
+                    "name",
+                    "description",
+                    "city",
+                    "country",
+                    "address",
+                    "starRating",
+                    "minPrice",
+                    "maxPrice",
+                    "amenities",
+                    "latitude",
+                    "longitude",
+                    "imageUrls",
+                    "totalRooms",
+                    "availableRooms",
+                    "averageRating",
+                    "reviewCount",
+                    "isActive",
+                    "_geo"
+                });
+                
+                // Filterable attributes (fields that can be filtered)
+                settings.setFilterableAttributes(new String[]{
+                    "city",
+                    "country",
+                    "starRating",
+                    "minPrice",
+                    "maxPrice",
+                    "amenities",
+                    "isActive",
+                    "averageRating",
+                    "reviewCount",
+                    "_geo"  // Enable geo filtering
+                });
+                
+                // Sortable attributes (fields that can be sorted)
+                settings.setSortableAttributes(new String[]{
+                    "starRating",
+                    "minPrice",
+                    "maxPrice",
+                    "averageRating",
+                    "reviewCount",
+                    "name",
+                    "_geo"  // Enable geo sorting (distance)
+                });
+                
+                // Ranking rules (order matters!)
+                settings.setRankingRules(new String[]{
+                    "words",        // Number of words matching
+                    "typo",         // Typo tolerance
+                    "proximity",    // Proximity of words to each other
+                    "attribute",    // Attribute order importance
+                    "sort",         // Custom sorting
+                    "exactness"     // Exact match bonus
+                });
+                
+                // Configure synonyms for better search experience (simplified for SDK 0.11.1)
+                HashMap<String, String[]> synonyms = new HashMap<>();
+                synonyms.put("hotel", new String[]{"accommodation", "lodge", "inn", "resort", "motel"});
+                synonyms.put("luxury", new String[]{"premium", "deluxe", "high-end", "upscale", "5-star"});
+                synonyms.put("budget", new String[]{"cheap", "affordable", "economic", "value", "low-cost"});
+                synonyms.put("wifi", new String[]{"wi-fi", "internet", "wireless", "connection"});
+                synonyms.put("pool", new String[]{"swimming pool", "swim", "aquatic"});
+                synonyms.put("gym", new String[]{"fitness", "workout", "exercise", "fitness center"});
+                synonyms.put("restaurant", new String[]{"dining", "food", "cuisine", "eatery"});
+                synonyms.put("parking", new String[]{"car park", "garage", "valet"});
+                
+                settings.setSynonyms(synonyms);
+                
+                // Note: TypoTolerance configuration not available in SDK 0.11.1
+                log.debug("Advanced typo tolerance configuration skipped for SDK 0.11.1 compatibility");
+                
+                // Apply settings to index
+                index.updateSettings(settings);
+                log.info("Index settings updated successfully for '{}'", HOTEL_INDEX);
+            } else {
+                log.info("Index '{}' settings are up to date, skipping configuration", HOTEL_INDEX);
+            }
             
             log.info("Meilisearch index '{}' configured successfully", HOTEL_INDEX);
             
@@ -371,5 +393,21 @@ public class IndexService {
                 .isActive(true)
                 .build()
         );
+    }
+    
+    /**
+     * Check if index settings need to be updated.
+     * For now, we'll assume settings are up to date if index exists.
+     * In production, you might want to compare current settings with expected settings.
+     */
+    private boolean shouldUpdateSettings(Index index) {
+        try {
+            // For simplicity, we'll only update settings for new indexes
+            // In production, you could compare current settings with expected settings
+            return false;
+        } catch (Exception e) {
+            log.warn("Failed to check index settings, will update settings", e);
+            return true;
+        }
     }
 }

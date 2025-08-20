@@ -9,6 +9,7 @@ import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
@@ -29,32 +30,40 @@ public class InventoryService {
         maxAttempts = 3,
         backoff = @Backoff(delay = 100, multiplier = 2)
     )
+    @Transactional(isolation = Isolation.SERIALIZABLE)
     public boolean reserveInventory(UUID roomTypeId, LocalDate checkIn, LocalDate checkOut, int rooms) {
         log.info("Reserving {} rooms for roomType {} from {} to {}", 
             rooms, roomTypeId, checkIn, checkOut);
         
-        List<LocalDate> dates = getDateRange(checkIn, checkOut);
-        List<RoomInventory> inventoriesToUpdate = new ArrayList<>();
+        // Use SELECT ... FOR UPDATE for true atomic locking
+        List<RoomInventory> inventories = inventoryRepository
+            .findByRoomTypeIdAndDateRangeForUpdate(roomTypeId, checkIn, checkOut.minusDays(1));
         
-        // First, check availability for all dates
-        for (LocalDate date : dates) {
-            RoomInventory inventory = inventoryRepository
-                .findByRoomTypeIdAndDate(roomTypeId, date)
-                .orElseThrow(() -> new InventoryNotFoundException(
-                    "Inventory not found for roomType " + roomTypeId + " on date: " + date));
-            
-            if (inventory.getAvailableRooms() < rooms) {
-                log.warn("Insufficient inventory on date: {}. Available: {}, Required: {}", 
-                    date, inventory.getAvailableRooms(), rooms);
-                return false;
-            }
-            
-            inventoriesToUpdate.add(inventory);
+        if (inventories.isEmpty()) {
+            log.warn("No inventory found for roomType {} from {} to {}", roomTypeId, checkIn, checkOut);
+            return false;
         }
         
-        // If all dates have sufficient inventory, reserve them
+        // Check if we have inventory for all required dates
+        List<LocalDate> requiredDates = getDateRange(checkIn, checkOut);
+        if (inventories.size() != requiredDates.size()) {
+            log.warn("Incomplete inventory found for roomType {}. Required {} dates, found {} records", 
+                roomTypeId, requiredDates.size(), inventories.size());
+            return false;
+        }
+        
+        // Check availability atomically
+        for (RoomInventory inventory : inventories) {
+            if (inventory.getAvailableRooms() < rooms) {
+                log.warn("Insufficient inventory on date: {}. Available: {}, Required: {}", 
+                    inventory.getDate(), inventory.getAvailableRooms(), rooms);
+                return false;
+            }
+        }
+        
+        // If all dates have sufficient inventory, reserve them atomically
         try {
-            for (RoomInventory inventory : inventoriesToUpdate) {
+            for (RoomInventory inventory : inventories) {
                 inventory.setAvailableRooms(inventory.getAvailableRooms() - rooms);
                 inventoryRepository.save(inventory);
                 log.debug("Reserved {} rooms for date: {}. Remaining: {}", 
@@ -76,6 +85,7 @@ public class InventoryService {
         maxAttempts = 3,
         backoff = @Backoff(delay = 100, multiplier = 2)
     )
+    @Transactional(isolation = Isolation.SERIALIZABLE)
     public void releaseInventory(UUID roomTypeId, LocalDate checkIn, LocalDate checkOut, int rooms) {
         log.info("Releasing {} rooms for roomType {} from {} to {}", 
             rooms, roomTypeId, checkIn, checkOut);

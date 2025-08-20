@@ -5,8 +5,10 @@ import com.hotel.booking.exception.ServiceCommunicationException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientException;
+import reactor.core.publisher.Mono;
 
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -50,15 +52,28 @@ public class PricingService {
     
     private BigDecimal getRoomTypePrice(UUID roomTypeId) {
         try {
-            WebClient webClient = webClientBuilder.build();
+            WebClient webClient = webClientBuilder
+                .baseUrl("http://hotel-service:8082")
+                .build();
             
             log.debug("Calling hotel service for room type price: {}", roomTypeId);
             
             RoomTypeResponse response = webClient.get()
-                .uri("http://hotel-service:8082/api/v1/hotels/rooms/{id}", roomTypeId)
+                .uri("/api/v1/hotels/rooms/{id}", roomTypeId)
                 .retrieve()
+                .onStatus(HttpStatus::is4xxClientError, 
+                    clientResponse -> {
+                        log.warn("Room type not found: {}", roomTypeId);
+                        return Mono.error(new RuntimeException("Room type not found"));
+                    })
+                .onStatus(HttpStatus::is5xxServerError,
+                    clientResponse -> {
+                        log.error("Hotel service unavailable for room type: {}", roomTypeId);
+                        return Mono.error(new ServiceCommunicationException("Hotel service unavailable"));
+                    })
                 .bodyToMono(RoomTypeResponse.class)
-                .block(Duration.ofSeconds(5));
+                .timeout(Duration.ofSeconds(5))
+                .block();
             
             if (response != null && response.getPricePerNight() != null) {
                 log.debug("Retrieved price {} for room type {}", response.getPricePerNight(), roomTypeId);
@@ -68,14 +83,17 @@ public class PricingService {
             log.warn("Room type price not found, using default for roomTypeId: {}", roomTypeId);
             return getDefaultPrice();
             
+        } catch (ServiceCommunicationException e) {
+            log.error("Hotel service unavailable for: {}", roomTypeId, e);
+            throw e; // Re-throw service communication exceptions
         } catch (WebClientException e) {
             log.error("WebClient error fetching room type price for: {}", roomTypeId, e);
             log.warn("Using fallback price due to service communication error");
-            return getDefaultPrice(); // Fallback instead of throwing exception
+            return getDefaultPrice(); // Fallback for network issues
         } catch (Exception e) {
             log.error("Unexpected error fetching room type price for: {}", roomTypeId, e);
             log.warn("Using fallback price due to unexpected error");
-            return getDefaultPrice(); // Fallback instead of throwing exception
+            return getDefaultPrice(); // Fallback for other errors
         }
     }
     

@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
+import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
@@ -41,6 +42,19 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         "GET:/api/v1/search"
     );
     
+    // Internal service communication paths - only allow from internal network
+    private static final List<String> INTERNAL_SERVICE_PATHS = List.of(
+        "GET:/api/v1/users/"
+    );
+    
+    // Docker internal network CIDR ranges
+    private static final List<String> INTERNAL_NETWORK_RANGES = List.of(
+        "172.20.0.0/16",  // Docker default bridge network
+        "172.16.0.0/12",  // Docker custom networks
+        "127.0.0.1/32",   // Localhost
+        "10.0.0.0/8"      // Private network range
+    );
+    
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
         ServerHttpRequest request = exchange.getRequest();
@@ -58,6 +72,17 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         // Allow public read access to certain endpoints
         if (isPublicReadPath(method, path)) {
             log.debug("Allowing public read access to: {} {}", method, path);
+            return chain.filter(exchange);
+        }
+        
+        // Check for internal service communication
+        if (isInternalServicePath(method, path)) {
+            String clientIp = getClientIpAddress(request);
+            if (!isInternalNetwork(clientIp)) {
+                log.warn("Blocking external access to internal service path: {} {} from IP: {}", method, path, clientIp);
+                return onError(exchange, "Access denied: Internal service path", HttpStatus.FORBIDDEN);
+            }
+            log.debug("Allowing internal service access to: {} {} from IP: {}", method, path, clientIp);
             return chain.filter(exchange);
         }
         
@@ -122,6 +147,42 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
                 }
                 return methodPath.startsWith(publicPath);
             });
+    }
+    
+    private boolean isInternalServicePath(String method, String path) {
+        String methodPath = method + ":" + path;
+        return INTERNAL_SERVICE_PATHS.stream()
+            .anyMatch(internalPath -> methodPath.startsWith(internalPath));
+    }
+    
+    private String getClientIpAddress(ServerHttpRequest request) {
+        // Check X-Forwarded-For header first (in case of proxy)
+        String xForwardedFor = request.getHeaders().getFirst("X-Forwarded-For");
+        if (xForwardedFor != null && !xForwardedFor.isEmpty()) {
+            return xForwardedFor.split(",")[0].trim();
+        }
+        
+        // Check X-Real-IP header
+        String xRealIp = request.getHeaders().getFirst("X-Real-IP");
+        if (xRealIp != null && !xRealIp.isEmpty()) {
+            return xRealIp;
+        }
+        
+        // Fall back to remote address
+        InetSocketAddress remoteAddress = request.getRemoteAddress();
+        return remoteAddress != null ? remoteAddress.getAddress().getHostAddress() : "unknown";
+    }
+    
+    private boolean isInternalNetwork(String ip) {
+        if (ip == null || "unknown".equals(ip)) {
+            return false;
+        }
+        
+        // Simple IP range checking for common internal networks
+        return ip.startsWith("172.") || 
+               ip.startsWith("10.") || 
+               ip.startsWith("127.") || 
+               ip.equals("localhost");
     }
     
     private Mono<Void> onError(ServerWebExchange exchange, String message, HttpStatus httpStatus) {
