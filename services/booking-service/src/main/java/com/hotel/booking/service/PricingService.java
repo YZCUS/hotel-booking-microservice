@@ -4,8 +4,8 @@ import com.hotel.booking.dto.RoomTypeResponse;
 import com.hotel.booking.exception.ServiceCommunicationException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Service;
-import org.springframework.http.HttpStatus;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientException;
 import reactor.core.publisher.Mono;
@@ -61,12 +61,12 @@ public class PricingService {
             RoomTypeResponse response = webClient.get()
                 .uri("/api/v1/hotels/rooms/{id}", roomTypeId)
                 .retrieve()
-                .onStatus(HttpStatus::is4xxClientError, 
+                .onStatus(HttpStatusCode::is4xxClientError,
                     clientResponse -> {
                         log.warn("Room type not found: {}", roomTypeId);
                         return Mono.error(new RuntimeException("Room type not found"));
                     })
-                .onStatus(HttpStatus::is5xxServerError,
+                .onStatus(HttpStatusCode::is5xxServerError,
                     clientResponse -> {
                         log.error("Hotel service unavailable for room type: {}", roomTypeId);
                         return Mono.error(new ServiceCommunicationException("Hotel service unavailable"));
