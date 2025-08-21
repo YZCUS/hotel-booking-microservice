@@ -1,4 +1,4 @@
-package com.hotel.user.config;
+package com.hotel.booking.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -33,8 +33,19 @@ public class RedisConfig {
     
     @Bean
     public RedisCacheManager cacheManager(RedisConnectionFactory connectionFactory) {
-        RedisCacheConfiguration cacheConfig = RedisCacheConfiguration.defaultCacheConfig()
-                .entryTtl(Duration.ofMinutes(10))
+        // 房間價格緩存配置 (長期緩存，1小時過期)
+        RedisCacheConfiguration roomPricesConfig = RedisCacheConfiguration.defaultCacheConfig()
+                .entryTtl(Duration.ofHours(1))
+                .serializeKeysWith(
+                    org.springframework.data.redis.serializer.RedisSerializationContext.SerializationPair
+                        .fromSerializer(new StringRedisSerializer()))
+                .serializeValuesWith(
+                    org.springframework.data.redis.serializer.RedisSerializationContext.SerializationPair
+                        .fromSerializer(new GenericJackson2JsonRedisSerializer()));
+        
+        // 房間可用性緩存配置 (短期緩存，5分鐘過期)
+        RedisCacheConfiguration roomAvailabilityConfig = RedisCacheConfiguration.defaultCacheConfig()
+                .entryTtl(Duration.ofMinutes(5))
                 .serializeKeysWith(
                     org.springframework.data.redis.serializer.RedisSerializationContext.SerializationPair
                         .fromSerializer(new StringRedisSerializer()))
@@ -43,7 +54,9 @@ public class RedisConfig {
                         .fromSerializer(new GenericJackson2JsonRedisSerializer()));
         
         return RedisCacheManager.builder(connectionFactory)
-                .cacheDefaults(cacheConfig)
+                .cacheDefaults(roomAvailabilityConfig)
+                .withCacheConfiguration("room-prices", roomPricesConfig)
+                .withCacheConfiguration("room-availability", roomAvailabilityConfig)
                 .build();
     }
 }

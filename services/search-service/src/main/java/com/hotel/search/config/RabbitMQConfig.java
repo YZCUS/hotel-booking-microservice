@@ -73,6 +73,7 @@ public class RabbitMQConfig {
         return QueueBuilder.durable(SEARCH_HISTORY_QUEUE)
                 .withArgument("x-dead-letter-exchange", SEARCH_EXCHANGE + ".dlx")
                 .withArgument("x-dead-letter-routing-key", "search.history.dlq")
+                .withArgument("x-message-ttl", 7200000) // 2 hours TTL for search history (analytics data)
                 .build();
     }
     
@@ -116,6 +117,11 @@ public class RabbitMQConfig {
     }
     
     @Bean
+    public FanoutExchange searchDeadLetterExchange() {
+        return new FanoutExchange(SEARCH_EXCHANGE + ".dlx");
+    }
+    
+    @Bean
     public Queue hotelCreatedDeadLetterQueue() {
         return new Queue("hotel.created.dlq", true);
     }
@@ -149,6 +155,18 @@ public class RabbitMQConfig {
         return BindingBuilder
                 .bind(hotelDeletedDeadLetterQueue())
                 .to(deadLetterExchange());
+    }
+    
+    @Bean
+    public Queue searchHistoryDeadLetterQueue() {
+        return new Queue("search.history.dlq", true);
+    }
+    
+    @Bean
+    public Binding searchHistoryDLQBinding() {
+        return BindingBuilder
+                .bind(searchHistoryDeadLetterQueue())
+                .to(searchDeadLetterExchange());
     }
     
     // Message converter

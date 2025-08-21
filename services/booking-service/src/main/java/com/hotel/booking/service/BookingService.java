@@ -8,6 +8,7 @@ import com.hotel.booking.entity.BookingStatus;
 import com.hotel.booking.event.BookingCancelledEvent;
 import com.hotel.booking.event.BookingCreatedEvent;
 import com.hotel.booking.event.EventPublisher;
+import com.hotel.booking.exception.AccessDeniedException;
 import com.hotel.booking.exception.BookingConflictException;
 import com.hotel.booking.exception.BookingNotFoundException;
 import com.hotel.booking.exception.InsufficientInventoryException;
@@ -22,6 +23,9 @@ import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -39,6 +43,7 @@ public class BookingService {
     private final InventoryService inventoryService;
     private final PricingService pricingService;
     private final EventPublisher eventPublisher;
+    private final ApplicationEventPublisher applicationEventPublisher;
     
     private static final int MAX_RETRY_ATTEMPTS = 3;
     
@@ -89,8 +94,8 @@ public class BookingService {
             
             Booking saved = bookingRepository.save(booking);
             
-            // Publish event
-            publishBookingCreatedEvent(saved);
+            // 發布領域事件，將在事務提交後處理
+            applicationEventPublisher.publishEvent(saved);
             
             log.info("Successfully created booking: {} for user: {}", saved.getId(), request.getUserId());
             return mapToResponse(saved);
@@ -159,8 +164,8 @@ public class BookingService {
                 1
             );
             
-            // Publish cancellation event
-            publishBookingCancelledEvent(updated);
+            // 發布領域事件，與 BookingCreated 保持一致
+            applicationEventPublisher.publishEvent(updated);
             
             log.info("Successfully cancelled booking: {}", bookingId);
             return mapToResponse(updated);
@@ -223,6 +228,19 @@ public class BookingService {
         return bookings.map(this::mapToResponse);
     }
     
+    public void validateBookingOwnership(UUID bookingId, UUID userId) {
+        log.debug("Validating ownership of booking {} for user {}", bookingId, userId);
+        
+        Booking booking = bookingRepository.findById(bookingId)
+                .orElseThrow(() -> new BookingNotFoundException("Booking not found with id: " + bookingId));
+        
+        if (!booking.getUserId().equals(userId)) {
+            log.warn("User {} attempted to access booking {} owned by user {}", 
+                    userId, bookingId, booking.getUserId());
+            throw new AccessDeniedException("You can only access your own bookings");
+        }
+    }
+    
     private void validateBookingDates(LocalDate checkIn, LocalDate checkOut) {
         if (checkIn.isBefore(LocalDate.now())) {
             throw new IllegalArgumentException("Check-in date cannot be in the past");
@@ -242,7 +260,10 @@ public class BookingService {
         }
     }
     
-    private void publishBookingCreatedEvent(Booking booking) {
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void handleBookingCreated(Booking booking) {
+        log.info("Handling booking created event for booking: {}", booking.getId());
+        
         try {
             BookingCreatedEvent event = BookingCreatedEvent.builder()
                 .bookingId(booking.getId())
@@ -256,13 +277,24 @@ public class BookingService {
                 .build();
             
             eventPublisher.publishBookingCreated(event);
+            log.info("Successfully published booking created event for booking: {}", booking.getId());
+            
         } catch (Exception e) {
             log.error("Failed to publish booking created event for booking: {}", booking.getId(), e);
-            // Don't fail the booking process due to event publishing failure
+            // 事件發布失敗不會影響已提交的預訂
+            // 可以考慮實施重試機制或將失敗的事件存儲起來稍後重試
         }
     }
     
-    private void publishBookingCancelledEvent(Booking booking) {
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void handleBookingCancelled(Booking booking) {
+        // 只處理取消狀態的預訂
+        if (booking.getStatus() != BookingStatus.CANCELLED) {
+            return;
+        }
+        
+        log.info("Handling booking cancelled event for booking: {}", booking.getId());
+        
         try {
             BookingCancelledEvent event = BookingCancelledEvent.builder()
                 .bookingId(booking.getId())
@@ -276,9 +308,11 @@ public class BookingService {
                 .build();
             
             eventPublisher.publishBookingCancelled(event);
+            log.info("Successfully published booking cancelled event for booking: {}", booking.getId());
+            
         } catch (Exception e) {
             log.error("Failed to publish booking cancelled event for booking: {}", booking.getId(), e);
-            // Don't fail the cancellation process due to event publishing failure
+            // 事件發布失敗不會影響已提交的取消操作
         }
     }
     

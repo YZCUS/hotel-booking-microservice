@@ -29,6 +29,7 @@ public class RabbitMQConfig {
         return QueueBuilder.durable(BOOKING_CREATED_QUEUE)
                 .withArgument("x-dead-letter-exchange", BOOKING_EXCHANGE + ".dlx")
                 .withArgument("x-dead-letter-routing-key", "booking.created.dlq")
+                .withArgument("x-message-ttl", 1800000) // 30 minutes TTL for booking events
                 .build();
     }
     
@@ -37,6 +38,7 @@ public class RabbitMQConfig {
         return QueueBuilder.durable(BOOKING_CANCELLED_QUEUE)
                 .withArgument("x-dead-letter-exchange", BOOKING_EXCHANGE + ".dlx")
                 .withArgument("x-dead-letter-routing-key", "booking.cancelled.dlq")
+                .withArgument("x-message-ttl", 1800000) // 30 minutes TTL for booking events
                 .build();
     }
     

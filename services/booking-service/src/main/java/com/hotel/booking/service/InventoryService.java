@@ -5,6 +5,8 @@ import com.hotel.booking.exception.InventoryNotFoundException;
 import com.hotel.booking.repository.RoomInventoryRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
@@ -31,6 +33,7 @@ public class InventoryService {
         backoff = @Backoff(delay = 100, multiplier = 2)
     )
     @Transactional(isolation = Isolation.SERIALIZABLE)
+    @CacheEvict(value = "room-availability", allEntries = true, beforeInvocation = false)
     public boolean reserveInventory(UUID roomTypeId, LocalDate checkIn, LocalDate checkOut, int rooms) {
         log.info("Reserving {} rooms for roomType {} from {} to {}", 
             rooms, roomTypeId, checkIn, checkOut);
@@ -86,6 +89,7 @@ public class InventoryService {
         backoff = @Backoff(delay = 100, multiplier = 2)
     )
     @Transactional(isolation = Isolation.SERIALIZABLE)
+    @CacheEvict(value = "room-availability", allEntries = true, beforeInvocation = false)
     public void releaseInventory(UUID roomTypeId, LocalDate checkIn, LocalDate checkOut, int rooms) {
         log.info("Releasing {} rooms for roomType {} from {} to {}", 
             rooms, roomTypeId, checkIn, checkOut);
@@ -93,19 +97,25 @@ public class InventoryService {
         List<LocalDate> dates = getDateRange(checkIn, checkOut);
         
         try {
-            for (LocalDate date : dates) {
-                RoomInventory inventory = inventoryRepository
-                    .findByRoomTypeIdAndDate(roomTypeId, date)
-                    .orElseThrow(() -> new InventoryNotFoundException(
-                        "Inventory not found for roomType " + roomTypeId + " on date: " + date));
-                
-                // Increase available inventory
-                inventory.setAvailableRooms(inventory.getAvailableRooms() + rooms);
-                inventoryRepository.save(inventory);
-                
-                log.debug("Released {} rooms for date: {}. Available: {}", 
-                    rooms, date, inventory.getAvailableRooms());
+            // 批量查詢避免 N+1 問題
+            List<RoomInventory> inventories = inventoryRepository
+                .findByRoomTypeIdAndDateBetween(roomTypeId, checkIn, checkOut.minusDays(1));
+            
+            if (inventories.size() != dates.size()) {
+                throw new InventoryNotFoundException(
+                    "Incomplete inventory found for roomType " + roomTypeId + 
+                    ". Expected " + dates.size() + " dates, found " + inventories.size());
             }
+            
+            // 批量更新庫存
+            for (RoomInventory inventory : inventories) {
+                inventory.setAvailableRooms(inventory.getAvailableRooms() + rooms);
+                log.debug("Released {} rooms for date: {}. Available: {}", 
+                    rooms, inventory.getDate(), inventory.getAvailableRooms());
+            }
+            
+            // 一次性保存所有更新
+            inventoryRepository.saveAll(inventories);
             
             log.info("Successfully released {} rooms for roomType {} from {} to {}", 
                 rooms, roomTypeId, checkIn, checkOut);
@@ -116,6 +126,9 @@ public class InventoryService {
         }
     }
     
+    @Cacheable(value = "room-availability", 
+               key = "#roomTypeId + '_' + #checkIn + '_' + #checkOut + '_' + #rooms",
+               unless = "#result == false")
     public boolean checkAvailability(UUID roomTypeId, LocalDate checkIn, LocalDate checkOut, int rooms) {
         log.debug("Checking availability for {} rooms for roomType {} from {} to {}", 
             rooms, roomTypeId, checkIn, checkOut);
@@ -137,19 +150,33 @@ public class InventoryService {
         LocalDate startDate = LocalDate.now();
         LocalDate endDate = startDate.plusDays(daysAhead);
         
+        // 批量查詢現有庫存避免重複插入
+        List<RoomInventory> existingInventories = inventoryRepository
+            .findByRoomTypeIdAndDateBetween(roomTypeId, startDate, endDate);
+        
+        // 創建現有日期的集合用於快速查找
+        List<LocalDate> existingDates = existingInventories.stream()
+            .map(RoomInventory::getDate)
+            .toList();
+        
+        // 批量創建不存在的庫存記錄
+        List<RoomInventory> newInventories = new ArrayList<>();
         for (LocalDate date = startDate; !date.isAfter(endDate); date = date.plusDays(1)) {
-            // Check if inventory already exists for this date
-            if (!inventoryRepository.findByRoomTypeIdAndDate(roomTypeId, date).isPresent()) {
+            if (!existingDates.contains(date)) {
                 RoomInventory inventory = RoomInventory.builder()
                     .roomTypeId(roomTypeId)
                     .date(date)
                     .availableRooms(totalRooms)
                     .build();
-                
-                inventoryRepository.save(inventory);
-                log.debug("Initialized inventory for roomType {} on date {} with {} rooms", 
-                    roomTypeId, date, totalRooms);
+                newInventories.add(inventory);
             }
+        }
+        
+        // 批量保存所有新庫存記錄
+        if (!newInventories.isEmpty()) {
+            inventoryRepository.saveAll(newInventories);
+            log.info("Batch inserted {} new inventory records for roomType {}", 
+                newInventories.size(), roomTypeId);
         }
         
         log.info("Successfully initialized inventory for roomType {} for {} days", roomTypeId, daysAhead);

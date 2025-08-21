@@ -4,6 +4,7 @@ import com.hotel.booking.dto.RoomTypeResponse;
 import com.hotel.booking.exception.ServiceCommunicationException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -50,6 +51,7 @@ public class PricingService {
         }
     }
     
+    @Cacheable(value = "room-prices", key = "#roomTypeId", unless = "#result == null")
     private BigDecimal getRoomTypePrice(UUID roomTypeId) {
         try {
             WebClient webClient = webClientBuilder

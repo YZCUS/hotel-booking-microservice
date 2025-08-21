@@ -19,6 +19,21 @@ import java.util.Map;
 @Slf4j
 public class GlobalExceptionHandler {
     
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ErrorResponse> handleAccessDenied(AccessDeniedException ex, HttpServletRequest request) {
+        log.warn("Access denied: {}", ex.getMessage());
+        
+        ErrorResponse error = ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.FORBIDDEN.value())
+                .error("Access Denied")
+                .message(ex.getMessage())
+                .path(request.getRequestURI())
+                .build();
+                
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error);
+    }
+    
     @ExceptionHandler(BookingNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleBookingNotFound(BookingNotFoundException ex, HttpServletRequest request) {
         log.error("Booking not found: {}", ex.getMessage());
@@ -79,6 +94,21 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error);
     }
     
+    @ExceptionHandler(ServiceCommunicationException.class)
+    public ResponseEntity<ErrorResponse> handleServiceCommunication(ServiceCommunicationException ex, HttpServletRequest request) {
+        log.error("Service communication error: {}", ex.getMessage());
+        
+        ErrorResponse error = ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.SERVICE_UNAVAILABLE.value())
+                .error("Service Unavailable")
+                .message("External service is temporarily unavailable. Please try again later.")
+                .path(request.getRequestURI())
+                .build();
+                
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(error);
+    }
+    
     @ExceptionHandler(OptimisticLockingFailureException.class)
     public ResponseEntity<ErrorResponse> handleOptimisticLockingFailure(OptimisticLockingFailureException ex, HttpServletRequest request) {
         log.error("Optimistic locking failure: {}", ex.getMessage());
@@ -96,7 +126,7 @@ public class GlobalExceptionHandler {
     
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleValidationExceptions(MethodArgumentNotValidException ex, HttpServletRequest request) {
-        log.error("Validation failed: {}", ex.getMessage());
+        log.warn("Validation failed for request: {}", request.getRequestURI());
         
         Map<String, String> errors = new HashMap<>();
         ex.getBindingResult().getAllErrors().forEach((error) -> {
@@ -105,11 +135,16 @@ public class GlobalExceptionHandler {
             errors.put(fieldName, errorMessage);
         });
         
+        // 創建友好的錯誤消息
+        StringBuilder message = new StringBuilder("請修正以下字段: ");
+        errors.forEach((field, msg) -> message.append(field).append(" (").append(msg).append("), "));
+        String friendlyMessage = message.substring(0, message.length() - 2); // 移除最後的逗號
+        
         ErrorResponse error = ErrorResponse.builder()
                 .timestamp(LocalDateTime.now())
                 .status(HttpStatus.BAD_REQUEST.value())
                 .error("Validation Failed")
-                .message("Invalid input: " + errors.toString())
+                .message(friendlyMessage)
                 .path(request.getRequestURI())
                 .build();
                 
@@ -131,19 +166,51 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
     }
     
+    // RuntimeException handler should be the last among RuntimeException subclasses
+    // to avoid catching specific exceptions before their dedicated handlers
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<ErrorResponse> handleRuntimeException(RuntimeException ex, HttpServletRequest request) {
-        log.error("Runtime exception: {}", ex.getMessage(), ex);
+        log.error("Unhandled runtime exception at {}: {}", request.getRequestURI(), ex.getMessage(), ex);
+        
+        // 為生產環境隱藏技術細節，避免暴露敏感信息
+        String userMessage = "服務暫時不可用，請稍後再試";
         
         ErrorResponse error = ErrorResponse.builder()
                 .timestamp(LocalDateTime.now())
                 .status(HttpStatus.INTERNAL_SERVER_ERROR.value())
                 .error("Internal Server Error")
-                .message(ex.getMessage())
+                .message(userMessage)
                 .path(request.getRequestURI())
                 .build();
                 
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+    }
+    
+    /**
+     * 檢查異常消息是否適合向用戶顯示
+     * 避免暴露技術細節和敏感信息
+     */
+    private boolean isUserFriendlyMessage(String message) {
+        if (message == null || message.trim().isEmpty()) {
+            return false;
+        }
+        
+        // 檢查是否包含技術細節關鍵詞
+        String lowerMessage = message.toLowerCase();
+        String[] technicalKeywords = {
+            "sql", "database", "connection", "timeout", "null pointer", 
+            "class", "method", "exception", "stack", "trace", "jdbc",
+            "hibernate", "redis", "rabbitmq", "serialization"
+        };
+        
+        for (String keyword : technicalKeywords) {
+            if (lowerMessage.contains(keyword)) {
+                return false;
+            }
+        }
+        
+        // 檢查是否過長（可能包含技術細節）
+        return message.length() <= 100;
     }
     
     @ExceptionHandler(Exception.class)
