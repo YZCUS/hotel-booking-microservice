@@ -16,7 +16,7 @@ import java.util.UUID;
 @RequestMapping("/api/v1/favorites")
 @RequiredArgsConstructor
 @Slf4j
-@CrossOrigin(origins = "*", maxAge = 3600)
+// CORS configuration moved to global configuration for security
 public class FavoriteController {
     
     private final FavoriteService favoriteService;

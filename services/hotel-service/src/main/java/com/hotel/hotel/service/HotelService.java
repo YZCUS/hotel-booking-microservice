@@ -69,11 +69,21 @@ public class HotelService {
         
         String cacheKey = SEARCH_CACHE_KEY + criteria.hashCode() + ":" + pageable.hashCode();
         
-        // Check cache
-        Page<HotelResponse> cached = (Page<HotelResponse>) redisTemplate.opsForValue().get(cacheKey);
-        if (cached != null && userId == null) { // Only use cache for anonymous users
-            log.debug("Found cached search results");
-            return cached;
+        // Check cache with safe type checking
+        if (userId == null) { // Only use cache for anonymous users
+            try {
+                Object cachedObject = redisTemplate.opsForValue().get(cacheKey);
+                if (cachedObject instanceof Page<?>) {
+                    @SuppressWarnings("unchecked")
+                    Page<HotelResponse> cached = (Page<HotelResponse>) cachedObject;
+                    log.debug("Found cached search results");
+                    return cached;
+                }
+            } catch (Exception e) {
+                log.warn("Failed to retrieve from cache, proceeding with database query: {}", e.getMessage());
+                // Remove corrupted cache entry
+                redisTemplate.delete(cacheKey);
+            }
         }
         
         // Build dynamic query specification
@@ -82,9 +92,15 @@ public class HotelService {
         Page<Hotel> hotels = hotelRepository.findAll(spec, pageable);
         Page<HotelResponse> response = hotels.map(hotel -> mapToResponse(hotel, userId));
         
-        // Cache results for anonymous users only (10 minutes)
+        // Cache results for anonymous users only (10 minutes) with error handling
         if (userId == null) {
-            redisTemplate.opsForValue().set(cacheKey, response, CACHE_TTL_MINUTES, TimeUnit.MINUTES);
+            try {
+                redisTemplate.opsForValue().set(cacheKey, response, CACHE_TTL_MINUTES, TimeUnit.MINUTES);
+                log.debug("Cached search results for key: {}", cacheKey);
+            } catch (Exception e) {
+                log.warn("Failed to cache search results: {}", e.getMessage());
+                // Continue execution even if caching fails
+            }
         }
         
         return response;

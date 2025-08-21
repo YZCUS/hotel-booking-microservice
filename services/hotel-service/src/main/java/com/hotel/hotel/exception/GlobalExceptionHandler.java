@@ -3,6 +3,7 @@ package com.hotel.hotel.exception;
 import com.hotel.hotel.dto.ErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
@@ -78,6 +79,21 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error);
     }
     
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    public ResponseEntity<ErrorResponse> handleOptimisticLockingFailure(OptimisticLockingFailureException ex, HttpServletRequest request) {
+        log.warn("Optimistic locking failure: {}", ex.getMessage());
+        
+        ErrorResponse error = ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.CONFLICT.value())
+                .error("Concurrent Update Conflict")
+                .message("The resource was modified by another request. Please try again.")
+                .path(request.getRequestURI())
+                .build();
+                
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
+    }
+    
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleValidationExceptions(MethodArgumentNotValidException ex, HttpServletRequest request) {
         log.error("Validation failed: {}", ex.getMessage());
@@ -117,13 +133,17 @@ public class GlobalExceptionHandler {
     
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<ErrorResponse> handleRuntimeException(RuntimeException ex, HttpServletRequest request) {
-        log.error("Runtime exception: {}", ex.getMessage(), ex);
+        log.error("Runtime exception at {}: {}", request.getRequestURI(), ex.getMessage(), ex);
+        
+        // Hide technical details for production environment to avoid exposing sensitive information
+        String userMessage = isUserFriendlyMessage(ex.getMessage()) ? 
+                ex.getMessage() : "Service temporarily unavailable, please try again later";
         
         ErrorResponse error = ErrorResponse.builder()
                 .timestamp(LocalDateTime.now())
                 .status(HttpStatus.INTERNAL_SERVER_ERROR.value())
                 .error("Internal Server Error")
-                .message(ex.getMessage())
+                .message(userMessage)
                 .path(request.getRequestURI())
                 .build();
                 
@@ -143,5 +163,33 @@ public class GlobalExceptionHandler {
                 .build();
                 
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+    }
+    
+    /**
+     * Check if exception message is suitable for displaying to users
+     * Avoid exposing technical details and sensitive information
+     */
+    private boolean isUserFriendlyMessage(String message) {
+        if (message == null || message.trim().isEmpty()) {
+            return false;
+        }
+        
+        // Check if contains technical detail keywords
+        String lowerMessage = message.toLowerCase();
+        String[] technicalKeywords = {
+            "sql", "database", "connection", "timeout", "null pointer", 
+            "class", "method", "exception", "stack", "trace", "jdbc",
+            "hibernate", "redis", "serialization", "constraint",
+            "foreign key", "primary key", "deadlock", "lock timeout"
+        };
+        
+        for (String keyword : technicalKeywords) {
+            if (lowerMessage.contains(keyword)) {
+                return false;
+            }
+        }
+        
+        // Check if too long (may contain technical details)
+        return message.length() <= 100;
     }
 }

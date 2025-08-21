@@ -51,6 +51,10 @@ public class Hotel {
     @OneToMany(mappedBy = "hotel", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private List<RoomType> roomTypes;
     
+    @Version
+    @Column(name = "version")
+    private Long version;
+    
     @CreationTimestamp
     @Column(name = "created_at")
     private LocalDateTime createdAt;

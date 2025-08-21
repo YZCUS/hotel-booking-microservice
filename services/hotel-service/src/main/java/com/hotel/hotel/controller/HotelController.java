@@ -26,7 +26,7 @@ import java.util.UUID;
 @RequestMapping("/api/v1/hotels")
 @RequiredArgsConstructor
 @Slf4j
-@CrossOrigin(origins = "*", maxAge = 3600)
+// CORS configuration moved to global configuration for security
 public class HotelController {
     
     private final HotelService hotelService;

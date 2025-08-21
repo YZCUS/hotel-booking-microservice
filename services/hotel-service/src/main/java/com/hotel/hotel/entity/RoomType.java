@@ -41,6 +41,10 @@ public class RoomType {
     @Column(name = "total_inventory", nullable = false)
     private Integer totalInventory;
     
+    @Version
+    @Column(name = "version")
+    private Long version;
+    
     @CreationTimestamp
     @Column(name = "created_at")
     private LocalDateTime createdAt;
