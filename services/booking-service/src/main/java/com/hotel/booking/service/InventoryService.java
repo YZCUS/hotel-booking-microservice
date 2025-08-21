@@ -97,7 +97,7 @@ public class InventoryService {
         List<LocalDate> dates = getDateRange(checkIn, checkOut);
         
         try {
-            // 批量查詢避免 N+1 問題
+            // Batch query to avoid N+1 problem
             List<RoomInventory> inventories = inventoryRepository
                 .findByRoomTypeIdAndDateBetween(roomTypeId, checkIn, checkOut.minusDays(1));
             
@@ -107,14 +107,14 @@ public class InventoryService {
                     ". Expected " + dates.size() + " dates, found " + inventories.size());
             }
             
-            // 批量更新庫存
+            // Batch update inventory
             for (RoomInventory inventory : inventories) {
                 inventory.setAvailableRooms(inventory.getAvailableRooms() + rooms);
                 log.debug("Released {} rooms for date: {}. Available: {}", 
                     rooms, inventory.getDate(), inventory.getAvailableRooms());
             }
             
-            // 一次性保存所有更新
+            // Save all updates at once
             inventoryRepository.saveAll(inventories);
             
             log.info("Successfully released {} rooms for roomType {} from {} to {}", 
@@ -150,16 +150,16 @@ public class InventoryService {
         LocalDate startDate = LocalDate.now();
         LocalDate endDate = startDate.plusDays(daysAhead);
         
-        // 批量查詢現有庫存避免重複插入
+        // Batch query existing inventory to avoid duplicate inserts
         List<RoomInventory> existingInventories = inventoryRepository
             .findByRoomTypeIdAndDateBetween(roomTypeId, startDate, endDate);
         
-        // 創建現有日期的集合用於快速查找
+        // Create a set of existing dates for fast lookup
         List<LocalDate> existingDates = existingInventories.stream()
             .map(RoomInventory::getDate)
             .toList();
         
-        // 批量創建不存在的庫存記錄
+        // Batch create non-existing inventory records
         List<RoomInventory> newInventories = new ArrayList<>();
         for (LocalDate date = startDate; !date.isAfter(endDate); date = date.plusDays(1)) {
             if (!existingDates.contains(date)) {
@@ -172,7 +172,7 @@ public class InventoryService {
             }
         }
         
-        // 批量保存所有新庫存記錄
+        // Batch save all new inventory records
         if (!newInventories.isEmpty()) {
             inventoryRepository.saveAll(newInventories);
             log.info("Batch inserted {} new inventory records for roomType {}", 

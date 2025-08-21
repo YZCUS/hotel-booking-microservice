@@ -6,10 +6,10 @@ spring:
     name: search-service
   
   rabbitmq:
-    host: localhost
-    port: 5672
-    username: guest
-    password: guest
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD}
     virtual-host: /
     connection-timeout: 30000
     listener:
@@ -21,8 +21,8 @@ spring:
           multiplier: 2
 
 meilisearch:
-  host: http://localhost:7700
-  api-key: ${MEILISEARCH_API_KEY:masterKey}
+  host: ${MEILISEARCH_HOST:http://localhost:7700}
+  api-key: ${MEILISEARCH_API_KEY}
 
 management:
   endpoints:

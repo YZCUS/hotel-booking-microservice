@@ -6,9 +6,9 @@ spring:
     name: hotel-service
     
   datasource:
-    url: jdbc:postgresql://localhost:5432/hotel_reservation
-    username: hotel_user
-    password: hotel_pass
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/hotel_reservation}
+    username: ${DB_USERNAME:hotel_user}
+    password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
     
   jpa:
@@ -21,9 +21,9 @@ spring:
     show-sql: false
     
   redis:
-    host: localhost
-    port: 6379
-    password: ${REDIS_PASSWORD:hotel_redis_pass}
+    host: ${REDIS_HOST:localhost}
+    port: ${REDIS_PORT:6379}
+    password: ${REDIS_PASSWORD}
     timeout: 2000ms
     lettuce:
       pool:

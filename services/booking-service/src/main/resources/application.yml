@@ -6,9 +6,9 @@ spring:
     name: booking-service
   
   datasource:
-    url: jdbc:postgresql://localhost:5432/hotel_reservation
-    username: hotel_user
-    password: hotel_password
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/hotel_reservation}
+    username: ${DB_USERNAME:hotel_user}
+    password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: 20
@@ -33,9 +33,9 @@ spring:
     open-in-view: false
 
   redis:
-    host: localhost
-    port: 6379
-    password: ${REDIS_PASSWORD:hotel_redis_pass}
+    host: ${REDIS_HOST:localhost}
+    port: ${REDIS_PORT:6379}
+    password: ${REDIS_PASSWORD}
     timeout: 2000ms
     jedis:
       pool:
@@ -45,10 +45,10 @@ spring:
         max-wait: -1ms
 
   rabbitmq:
-    host: localhost
-    port: 5672
-    username: guest
-    password: guest
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD}
     virtual-host: /
     connection-timeout: 30000
     listener:
@@ -71,7 +71,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus
+        include: health,info,metrics,prometheus,circuitbreakers,retries
   endpoint:
     health:
       show-details: when-authorized
@@ -105,3 +105,34 @@ booking:
     winter-premium: 0.25
     advance-booking-discount: 0.10
     advance-booking-days: 30
+
+# Circuit Breaker Configuration
+resilience4j:
+  circuitbreaker:
+    instances:
+      hotel-service:
+        registerHealthIndicator: true
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        permittedNumberOfCallsInHalfOpenState: 3
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+        waitDurationInOpenState: 5s
+        failureRateThreshold: 50
+        eventConsumerBufferSize: 10
+        recordExceptions:
+          - java.net.ConnectException
+          - java.util.concurrent.TimeoutException
+          - org.springframework.web.reactive.function.client.WebClientException
+  
+  retry:
+    instances:
+      hotel-service:
+        maxAttempts: 3
+        waitDuration: 1000ms
+        enableExponentialBackoff: true
+        exponentialBackoffMultiplier: 2
+        
+  timelimiter:
+    instances:
+      hotel-service:
+        timeoutDuration: 3s

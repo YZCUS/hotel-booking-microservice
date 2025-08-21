@@ -33,7 +33,7 @@ public class RedisConfig {
     
     @Bean
     public RedisCacheManager cacheManager(RedisConnectionFactory connectionFactory) {
-        // 房間價格緩存配置 (長期緩存，1小時過期)
+        // Room price cache configuration (long-term cache, 1 hour TTL)
         RedisCacheConfiguration roomPricesConfig = RedisCacheConfiguration.defaultCacheConfig()
                 .entryTtl(Duration.ofHours(1))
                 .serializeKeysWith(
@@ -43,9 +43,19 @@ public class RedisConfig {
                     org.springframework.data.redis.serializer.RedisSerializationContext.SerializationPair
                         .fromSerializer(new GenericJackson2JsonRedisSerializer()));
         
-        // 房間可用性緩存配置 (短期緩存，5分鐘過期)
+        // Room availability cache configuration (short-term cache, 5 minutes TTL)
         RedisCacheConfiguration roomAvailabilityConfig = RedisCacheConfiguration.defaultCacheConfig()
                 .entryTtl(Duration.ofMinutes(5))
+                .serializeKeysWith(
+                    org.springframework.data.redis.serializer.RedisSerializationContext.SerializationPair
+                        .fromSerializer(new StringRedisSerializer()))
+                .serializeValuesWith(
+                    org.springframework.data.redis.serializer.RedisSerializationContext.SerializationPair
+                        .fromSerializer(new GenericJackson2JsonRedisSerializer()));
+        
+        // Pricing multipliers cache configuration (medium-term cache, 30 minutes TTL)
+        RedisCacheConfiguration pricingMultipliersConfig = RedisCacheConfiguration.defaultCacheConfig()
+                .entryTtl(Duration.ofMinutes(30))
                 .serializeKeysWith(
                     org.springframework.data.redis.serializer.RedisSerializationContext.SerializationPair
                         .fromSerializer(new StringRedisSerializer()))
@@ -57,6 +67,7 @@ public class RedisConfig {
                 .cacheDefaults(roomAvailabilityConfig)
                 .withCacheConfiguration("room-prices", roomPricesConfig)
                 .withCacheConfiguration("room-availability", roomAvailabilityConfig)
+                .withCacheConfiguration("pricing-multipliers", pricingMultipliersConfig)
                 .build();
     }
 }

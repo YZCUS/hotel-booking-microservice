@@ -10,9 +10,11 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-amqp'
 
 
-    // Retry mechanism
+    // Retry mechanism and Circuit Breaker
     implementation 'org.springframework.retry:spring-retry'
     implementation 'org.springframework.boot:spring-boot-starter-aop'
+    implementation 'io.github.resilience4j:resilience4j-spring-boot3:2.1.0'
+    implementation 'io.github.resilience4j:resilience4j-reactor:2.1.0'
     
     // JWT for token validation
     implementation 'io.jsonwebtoken:jjwt-api:0.11.5'

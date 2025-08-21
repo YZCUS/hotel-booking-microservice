@@ -16,12 +16,15 @@ spring:
         default_schema: PUBLIC
   
   redis:
-    host: localhost
-    port: 6370  # Different port for testing to avoid conflicts
+    host: ${TEST_REDIS_HOST:localhost}
+    port: ${TEST_REDIS_PORT:6370}  # Different port for testing to avoid conflicts
+    password: ${TEST_REDIS_PASSWORD:}  # Empty for H2 testing
   
   rabbitmq:
-    host: localhost
-    port: 5673  # Different port for testing
+    host: ${TEST_RABBITMQ_HOST:localhost}
+    port: ${TEST_RABBITMQ_PORT:5673}  # Different port for testing
+    username: ${TEST_RABBITMQ_USERNAME:guest}
+    password: ${TEST_RABBITMQ_PASSWORD:guest}  # Default for testing only
 
 logging:
   level:

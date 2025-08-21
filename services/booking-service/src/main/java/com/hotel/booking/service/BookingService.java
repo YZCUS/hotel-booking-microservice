@@ -94,7 +94,7 @@ public class BookingService {
             
             Booking saved = bookingRepository.save(booking);
             
-            // 發布領域事件，將在事務提交後處理
+            // Publish domain event, will be processed after transaction commit
             applicationEventPublisher.publishEvent(saved);
             
             log.info("Successfully created booking: {} for user: {}", saved.getId(), request.getUserId());
@@ -164,7 +164,7 @@ public class BookingService {
                 1
             );
             
-            // 發布領域事件，與 BookingCreated 保持一致
+            // Publish domain event, consistent with BookingCreated
             applicationEventPublisher.publishEvent(updated);
             
             log.info("Successfully cancelled booking: {}", bookingId);
@@ -281,14 +281,14 @@ public class BookingService {
             
         } catch (Exception e) {
             log.error("Failed to publish booking created event for booking: {}", booking.getId(), e);
-            // 事件發布失敗不會影響已提交的預訂
-            // 可以考慮實施重試機制或將失敗的事件存儲起來稍後重試
+            // Event publishing failure will not affect committed booking
+            // Consider implementing retry mechanism or storing failed events for later retry
         }
     }
     
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void handleBookingCancelled(Booking booking) {
-        // 只處理取消狀態的預訂
+        // Only process cancelled bookings
         if (booking.getStatus() != BookingStatus.CANCELLED) {
             return;
         }
@@ -312,7 +312,7 @@ public class BookingService {
             
         } catch (Exception e) {
             log.error("Failed to publish booking cancelled event for booking: {}", booking.getId(), e);
-            // 事件發布失敗不會影響已提交的取消操作
+            // Event publishing failure will not affect committed cancellation
         }
     }
     

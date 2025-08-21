@@ -30,9 +30,9 @@ spring:
         response-timeout: 30s
         
   redis:
-    host: localhost
-    port: 6379
-    password: ${REDIS_PASSWORD:hotel_redis_pass}
+    host: ${REDIS_HOST:localhost}
+    port: ${REDIS_PORT:6379}
+    password: ${REDIS_PASSWORD}
     timeout: 2000ms
     lettuce:
       pool:
@@ -43,7 +43,7 @@ spring:
     
   security:
     jwt:
-      secret: ${JWT_SECRET:ThisIsAVeryLongSecretKeyForHS512AlgorithmThatShouldBeAtLeast512BitsWhichIs64BytesLongForProperSecurityAndShouldBeRandomlyGenerated}
+      secret: ${JWT_SECRET}
 
 # CORS Configuration
 app:

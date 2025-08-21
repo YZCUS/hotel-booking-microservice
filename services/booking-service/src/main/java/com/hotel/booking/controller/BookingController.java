@@ -29,7 +29,7 @@ public class BookingController {
             @RequestHeader("X-User-Id") UUID authenticatedUserId,
             @Valid @RequestBody BookingRequest request) {
         
-        // 驗證當前用戶只能為自己創建預訂
+        // Verify that users can only create bookings for themselves
         if (!authenticatedUserId.equals(request.getUserId())) {
             log.warn("User {} attempted to create booking for user {}", authenticatedUserId, request.getUserId());
             throw new AccessDeniedException("Cannot create booking for another user");
@@ -65,9 +65,9 @@ public class BookingController {
             @RequestHeader(value = "X-User-Role", defaultValue = "USER") String userRole,
             @Valid @RequestBody CheckInRequest request) {
         
-        // 只有預訂者本人或酒店員工可以辦理入住
+        // Only the booking owner or hotel staff can check in
         if (!"HOTEL_STAFF".equals(userRole) && !"ADMIN".equals(userRole)) {
-            // 驗證是否為預訂者本人
+            // Verify if the user is the booking owner
             bookingService.validateBookingOwnership(bookingId, authenticatedUserId);
         }
         
@@ -82,9 +82,9 @@ public class BookingController {
             @RequestHeader("X-User-Id") UUID authenticatedUserId,
             @RequestHeader(value = "X-User-Role", defaultValue = "USER") String userRole) {
         
-        // 只有預訂者本人或酒店員工可以辦理退房
+        // Only the booking owner or hotel staff can check out
         if (!"HOTEL_STAFF".equals(userRole) && !"ADMIN".equals(userRole)) {
-            // 驗證是否為預訂者本人
+            // Verify if the user is the booking owner
             bookingService.validateBookingOwnership(bookingId, authenticatedUserId);
         }
         
@@ -99,7 +99,7 @@ public class BookingController {
             @RequestHeader("X-User-Id") UUID authenticatedUserId,
             Pageable pageable) {
         
-        // 驗證用戶只能查看自己的預訂
+        // Verify that users can only view their own bookings
         if (!authenticatedUserId.equals(userId)) {
             log.warn("User {} attempted to access bookings for user {}", authenticatedUserId, userId);
             throw new AccessDeniedException("Cannot access another user's bookings");

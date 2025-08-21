@@ -135,10 +135,10 @@ public class GlobalExceptionHandler {
             errors.put(fieldName, errorMessage);
         });
         
-        // 創建友好的錯誤消息
-        StringBuilder message = new StringBuilder("請修正以下字段: ");
+        // Create user-friendly error message
+        StringBuilder message = new StringBuilder("Please correct the following fields: ");
         errors.forEach((field, msg) -> message.append(field).append(" (").append(msg).append("), "));
-        String friendlyMessage = message.substring(0, message.length() - 2); // 移除最後的逗號
+        String friendlyMessage = message.substring(0, message.length() - 2); // Remove trailing comma
         
         ErrorResponse error = ErrorResponse.builder()
                 .timestamp(LocalDateTime.now())
@@ -172,8 +172,8 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleRuntimeException(RuntimeException ex, HttpServletRequest request) {
         log.error("Unhandled runtime exception at {}: {}", request.getRequestURI(), ex.getMessage(), ex);
         
-        // 為生產環境隱藏技術細節，避免暴露敏感信息
-        String userMessage = "服務暫時不可用，請稍後再試";
+        // Hide technical details for production environment to avoid exposing sensitive information
+        String userMessage = "Service temporarily unavailable, please try again later";
         
         ErrorResponse error = ErrorResponse.builder()
                 .timestamp(LocalDateTime.now())
@@ -187,15 +187,15 @@ public class GlobalExceptionHandler {
     }
     
     /**
-     * 檢查異常消息是否適合向用戶顯示
-     * 避免暴露技術細節和敏感信息
+     * Check if exception message is suitable for displaying to users
+     * Avoid exposing technical details and sensitive information
      */
     private boolean isUserFriendlyMessage(String message) {
         if (message == null || message.trim().isEmpty()) {
             return false;
         }
         
-        // 檢查是否包含技術細節關鍵詞
+        // Check if contains technical detail keywords
         String lowerMessage = message.toLowerCase();
         String[] technicalKeywords = {
             "sql", "database", "connection", "timeout", "null pointer", 
@@ -209,7 +209,7 @@ public class GlobalExceptionHandler {
             }
         }
         
-        // 檢查是否過長（可能包含技術細節）
+        // Check if too long (may contain technical details)
         return message.length() <= 100;
     }
     
