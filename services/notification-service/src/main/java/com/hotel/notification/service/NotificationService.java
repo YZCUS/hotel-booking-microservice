@@ -93,6 +93,7 @@ public class NotificationService {
             
             UserInfo userInfo = webClient.get()
                 .uri("http://user-service:8081/api/v1/users/{userId}", userId)
+                .header("X-Internal-Service", "notification-service")
                 .retrieve()
                 .bodyToMono(UserInfo.class)
                 .block();
