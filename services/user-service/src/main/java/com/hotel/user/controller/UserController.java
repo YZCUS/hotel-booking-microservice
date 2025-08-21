@@ -4,6 +4,7 @@ import com.hotel.user.dto.UpdateProfileRequest;
 import com.hotel.user.dto.UserResponse;
 import com.hotel.user.exception.AccessDeniedException;
 import com.hotel.user.service.UserService;
+import com.hotel.user.util.InternalServiceUtil;
 import com.hotel.user.util.JwtUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -18,11 +19,12 @@ import java.util.UUID;
 @RequestMapping("/api/v1/users")
 @RequiredArgsConstructor
 @Slf4j
-@CrossOrigin(origins = "*", maxAge = 3600)
+// CORS configuration moved to global configuration for security
 public class UserController {
     
     private final UserService userService;
     private final JwtUtil jwtUtil;
+    private final InternalServiceUtil internalServiceUtil;
     
     @GetMapping("/profile")
     public ResponseEntity<UserResponse> getProfile(HttpServletRequest request) {
@@ -59,7 +61,7 @@ public class UserController {
             HttpServletRequest request) {
         log.info("Getting user by id: {}", userId);
         
-        // Check for internal service call first
+        // Check if this is an authenticated internal service call
         if (isInternalServiceCall(request)) {
             log.info("Internal service access to user: {}", userId);
             UserResponse response = userService.getUserById(userId);
@@ -112,19 +114,12 @@ public class UserController {
     }
     
     private boolean isInternalServiceCall(HttpServletRequest request) {
-        // Check for internal service headers
-        String internalService = request.getHeader("X-Internal-Service");
-        String authenticatedFlag = request.getHeader("X-Authenticated");
-        
-        // Allow calls from notification service and other internal services
-        boolean isInternal = "notification-service".equals(internalService) || 
-                           "booking-service".equals(internalService) ||
-                           "hotel-service".equals(internalService);
-        
-        if (isInternal) {
-            log.debug("Internal service call detected from: {}", internalService);
+        // Check if Spring Security has already authenticated this as an internal service
+        var auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.isAuthenticated()) {
+            return auth.getAuthorities().stream()
+                    .anyMatch(authority -> "ROLE_INTERNAL_SERVICE".equals(authority.getAuthority()));
         }
-        
-        return isInternal;
+        return false;
     }
 }

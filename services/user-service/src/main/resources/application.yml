@@ -51,3 +51,19 @@ logging:
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
     file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+
+# CORS Configuration - Security restricted
+app:
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:3001}
+    allowed-methods: GET,POST,PUT,DELETE,OPTIONS
+    allowed-headers: Content-Type,Authorization,X-User-Id,X-Internal-Service,X-Internal-Token
+    allow-credentials: true
+    max-age: 3600
+  
+  # Internal Service Authentication - Secure token-based
+  internal:
+    service-secret: ${INTERNAL_SERVICE_SECRET:secure-shared-secret-change-in-production}
+    allowed-services: notification-service,booking-service,hotel-service
+    token-header: X-Internal-Token
+    service-header: X-Internal-Service
