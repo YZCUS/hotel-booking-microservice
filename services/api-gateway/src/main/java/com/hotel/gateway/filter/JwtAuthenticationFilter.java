@@ -1,5 +1,6 @@
 package com.hotel.gateway.filter;
 
+import com.hotel.gateway.config.GatewayApiProperties;
 import com.hotel.gateway.handler.GatewayErrorResponder;
 import com.hotel.gateway.util.IpAddressUtil;
 import com.hotel.gateway.util.JwtUtil;
@@ -23,38 +24,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
     
     private final JwtUtil jwtUtil;
     private final GatewayErrorResponder errorResponder;
-
-    // Paths that should not require authentication
-    private static final List<String> EXCLUDED_PATHS = List.of(
-        "/api/v1/auth/register",
-        "/api/v1/auth/login",
-        "/api/v1/auth/refresh",
-        "/api/v1/hotels",
-        "/api/v1/search",
-        "/api/v1/inventory/check-availability",
-        "/health/",
-        "/actuator/",
-        "/fallback/"
-    );
-
-    // Paths that allow public read access
-    private static final List<String> PUBLIC_READ_PATHS = List.of(
-        "GET:/api/v1/hotels",
-        "GET:/api/v1/search"
-    );
-    
-    // Internal service communication paths - only allow from internal network
-    private static final List<String> INTERNAL_SERVICE_PATHS = List.of(
-        "GET:/api/v1/users/"
-    );
-    
-    // Docker internal network CIDR ranges
-    private static final List<String> INTERNAL_NETWORK_RANGES = List.of(
-        "172.20.0.0/16",  // Docker default bridge network
-        "172.16.0.0/12",  // Docker custom networks
-        "127.0.0.1/32",   // Localhost
-        "10.0.0.0/8"      // Private network range
-    );
+    private final GatewayApiProperties gatewayApiProperties;
     
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
@@ -63,16 +33,10 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         String method = request.getMethod().name();
         
         log.debug("Processing request: {} {}", method, path);
-        
-        // Skip authentication for excluded paths
-        if (isExcludedPath(path)) {
-            log.debug("Skipping authentication for excluded path: {}", path);
-            return chain.filter(exchange);
-        }
-        
-        // Allow public read access to certain endpoints
-        if (isPublicReadPath(method, path)) {
-            log.debug("Allowing public read access to: {} {}", method, path);
+
+        // Skip authentication for public paths
+        if (isPublicPath(path)) {
+            log.debug("Skipping JWT authentication for public path: {}", path);
             return chain.filter(exchange);
         }
         
@@ -132,40 +96,58 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         }
         return null;
     }
-    
-    private boolean isExcludedPath(String path) {
-        return EXCLUDED_PATHS.stream()
-            .anyMatch(path::startsWith);
-    }
-    
-    private boolean isPublicReadPath(String method, String path) {
-        String methodPath = method + ":" + path;
-        return PUBLIC_READ_PATHS.stream()
-            .anyMatch(publicPath -> {
-                if (publicPath.contains("*")) {
-                    String pattern = publicPath.replace("*", ".*");
-                    return methodPath.matches(pattern);
-                }
-                return methodPath.startsWith(publicPath);
-            });
+
+    private boolean isPublicPath(String path) {
+        return gatewayApiProperties.getPublicPaths().stream()
+                .map(p -> p.replace("/**", ""))
+                .anyMatch(path::startsWith);
     }
     
     private boolean isInternalServicePath(String method, String path) {
         String methodPath = method + ":" + path;
-        return INTERNAL_SERVICE_PATHS.stream()
-            .anyMatch(methodPath::startsWith);
+        return gatewayApiProperties.getInternalServicePaths().stream()
+                .anyMatch(methodPath::startsWith);
     }
-    
+
     private boolean isInternalNetwork(String ip) {
-        if (ip == null || "unknown".equals(ip)) {
+        if (ip == null || "unknown".equals(ip) || ip.equals("localhost")) {
+            return "localhost".equals(ip); // localhost is safe
+        }
+
+        // check ip with docker internal network ranges
+        for (String cidr : gatewayApiProperties.getInternalNetworkRanges()) {
+            if (isIpInRange(ip, cidr)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isIpInRange(String ip, String cidr) {
+        try {
+            String[] parts = cidr.split("/");
+            String cidrIp = parts[0];
+            int prefix = Integer.parseInt(parts[1]);
+
+            long ipAddress = ipToLong(java.net.InetAddress.getByName(ip));
+            long cidrIpAddress = ipToLong(java.net.InetAddress.getByName(cidrIp));
+            long mask = (-1L) << (32 - prefix);
+
+            return (ipAddress & mask) == (cidrIpAddress & mask);
+        } catch (Exception e) {
+            log.warn("Failed to check if IP {} is in CIDR range {}: {}", ip, cidr, e.getMessage());
             return false;
         }
-        
-        // Simple IP range checking for common internal networks
-        return ip.startsWith("172.") ||
-               ip.startsWith("10.") ||
-               ip.startsWith("127.") ||
-               ip.equals("localhost");
+    }
+
+    private long ipToLong(java.net.InetAddress ip) {
+        byte[] octets = ip.getAddress();
+        long result = 0;
+        for (byte octet : octets) {
+            result <<= 8;
+            result |= octet & 0xff;
+        }
+        return result;
     }
     
     @Override

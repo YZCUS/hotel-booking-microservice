@@ -126,3 +126,24 @@ logging:
     file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level [%X{requestId}] %logger{36} - %msg%n"
   file:
     name: logs/api-gateway.log
+
+# API Gateway Configuration
+gateway:
+  api:
+    public-paths:
+      # following paths should not require authentication
+      - /api/v1/auth/**
+      - /api/v1/hotels/**
+      - /api/v1/search/**
+      - /api/v1/inventory/check-availability
+      - /health/**
+      - /actuator/**
+      - /fallback/**
+    internal-service-paths:
+      - GET:/api/v1/users/
+
+    internal-network-ranges:
+      - 172.20.0.0/16  # Docker default bridge network
+      - 172.16.0.0/12  # Docker custom networks
+      - 127.0.0.1/32   # Localhost
+      - 10.0.0.0/8     # Private network range
