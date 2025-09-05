@@ -1,21 +1,19 @@
 package com.hotel.gateway.filter;
 
+import com.hotel.gateway.handler.GatewayErrorResponder;
+import com.hotel.gateway.util.IpAddressUtil;
 import com.hotel.gateway.util.JwtUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
-import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.server.reactive.ServerHttpRequest;
-import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
-import java.net.InetSocketAddress;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 @Component
@@ -24,6 +22,7 @@ import java.util.List;
 public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
     
     private final JwtUtil jwtUtil;
+    private final GatewayErrorResponder errorResponder;
 
     // Paths that should not require authentication
     private static final List<String> EXCLUDED_PATHS = List.of(
@@ -79,10 +78,10 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         
         // Check for internal service communication
         if (isInternalServicePath(method, path)) {
-            String clientIp = getClientIpAddress(request);
+            String clientIp = IpAddressUtil.getClientIpAddress(request);
             if (!isInternalNetwork(clientIp)) {
                 log.warn("Blocking external access to internal service path: {} {} from IP: {}", method, path, clientIp);
-                return onError(exchange, "Access denied: Internal service path", HttpStatus.FORBIDDEN);
+                return errorResponder.createErrorResponse(exchange, HttpStatus.FORBIDDEN, "Access denied: Internal service path");
             }
             log.debug("Allowing internal service access to: {} {} from IP: {}", method, path, clientIp);
             return chain.filter(exchange);
@@ -93,7 +92,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         
         if (token == null) {
             log.warn("Missing authentication token for: {} {}", method, path);
-            return onError(exchange, "Missing authentication token", HttpStatus.UNAUTHORIZED);
+            return errorResponder.createErrorResponse(exchange, HttpStatus.UNAUTHORIZED, "Missing authentication token");
         }
         
         try {
@@ -115,11 +114,11 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
                 return chain.filter(exchange.mutate().request(modifiedRequest).build());
             } else {
                 log.warn("Invalid JWT token for: {} {}", method, path);
-                return onError(exchange, "Invalid or expired token", HttpStatus.UNAUTHORIZED);
+                return errorResponder.createErrorResponse(exchange, HttpStatus.UNAUTHORIZED,"Missing authentication token");
             }
         } catch (Exception e) {
             log.error("JWT validation error for: {} {}", method, path, e);
-            return onError(exchange, "Token validation failed", HttpStatus.UNAUTHORIZED);
+            return errorResponder.createErrorResponse(exchange, HttpStatus.UNAUTHORIZED, "Token validation failed");
         }
     }
     
@@ -136,7 +135,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
     
     private boolean isExcludedPath(String path) {
         return EXCLUDED_PATHS.stream()
-            .anyMatch(excluded -> path.startsWith(excluded));
+            .anyMatch(path::startsWith);
     }
     
     private boolean isPublicReadPath(String method, String path) {
@@ -154,25 +153,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
     private boolean isInternalServicePath(String method, String path) {
         String methodPath = method + ":" + path;
         return INTERNAL_SERVICE_PATHS.stream()
-            .anyMatch(internalPath -> methodPath.startsWith(internalPath));
-    }
-    
-    private String getClientIpAddress(ServerHttpRequest request) {
-        // Check X-Forwarded-For header first (in case of proxy)
-        String xForwardedFor = request.getHeaders().getFirst("X-Forwarded-For");
-        if (xForwardedFor != null && !xForwardedFor.isEmpty()) {
-            return xForwardedFor.split(",")[0].trim();
-        }
-        
-        // Check X-Real-IP header
-        String xRealIp = request.getHeaders().getFirst("X-Real-IP");
-        if (xRealIp != null && !xRealIp.isEmpty()) {
-            return xRealIp;
-        }
-        
-        // Fall back to remote address
-        InetSocketAddress remoteAddress = request.getRemoteAddress();
-        return remoteAddress != null ? remoteAddress.getAddress().getHostAddress() : "unknown";
+            .anyMatch(methodPath::startsWith);
     }
     
     private boolean isInternalNetwork(String ip) {
@@ -181,28 +162,10 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         }
         
         // Simple IP range checking for common internal networks
-        return ip.startsWith("172.") || 
-               ip.startsWith("10.") || 
-               ip.startsWith("127.") || 
+        return ip.startsWith("172.") ||
+               ip.startsWith("10.") ||
+               ip.startsWith("127.") ||
                ip.equals("localhost");
-    }
-    
-    private Mono<Void> onError(ServerWebExchange exchange, String message, HttpStatus httpStatus) {
-        ServerHttpResponse response = exchange.getResponse();
-        response.setStatusCode(httpStatus);
-        
-        String errorResponse = String.format(
-            "{\"error\":\"%s\",\"message\":\"%s\",\"timestamp\":\"%s\"}",
-            httpStatus.getReasonPhrase(),
-            message,
-            java.time.Instant.now().toString()
-        );
-        
-        byte[] bytes = errorResponse.getBytes(StandardCharsets.UTF_8);
-        DataBuffer buffer = response.bufferFactory().wrap(bytes);
-        
-        response.getHeaders().add("Content-Type", "application/json");
-        return response.writeWith(Mono.just(buffer));
     }
     
     @Override

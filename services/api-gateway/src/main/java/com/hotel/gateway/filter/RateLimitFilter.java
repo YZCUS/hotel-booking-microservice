@@ -1,32 +1,32 @@
 package com.hotel.gateway.filter;
 
-import lombok.RequiredArgsConstructor;
+import com.hotel.gateway.handler.GatewayErrorResponder;
+import com.hotel.gateway.util.IpAddressUtil;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
-import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.server.reactive.ServerHttpRequest;
-import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 
 @Component
 @Slf4j
 public class RateLimitFilter implements GlobalFilter, Ordered {
     
     private final ReactiveRedisTemplate<String, String> redisTemplate;
+    private final GatewayErrorResponder errorResponder;
     
-    public RateLimitFilter(@Qualifier("reactiveRedisTemplate") ReactiveRedisTemplate<String, String> redisTemplate) {
+    public RateLimitFilter(ReactiveRedisTemplate<String, String> redisTemplate, GatewayErrorResponder errorResponder) {
         this.redisTemplate = redisTemplate;
+        this.errorResponder =  errorResponder;
     }
     
     private static final int REQUESTS_PER_MINUTE = 60;
@@ -67,8 +67,9 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
                 if (count > rateLimit) {
                     log.warn("Rate limit exceeded for client: {} (requests: {}, limit: {})", 
                         clientId, count, rateLimit);
-                    return onError(exchange, "Rate limit exceeded. Please try again later.", 
-                        HttpStatus.TOO_MANY_REQUESTS);
+                    Map<String, String> headers = Map.of("Retry-After", "60"); // Suggest retry after 60 seconds
+                    return errorResponder.createErrorResponse(exchange,
+                        HttpStatus.TOO_MANY_REQUESTS, "Rate limit exceeded. Please try again later.", headers);
                 }
                 
                 // Add rate limit headers
@@ -93,23 +94,8 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
             return "user:" + userId;
         }
         
-        String clientIp = getClientIp(request);
+        String clientIp = IpAddressUtil.getClientIpAddress(request);
         return "ip:" + clientIp;
-    }
-    
-    private String getClientIp(ServerHttpRequest request) {
-        String xForwardedFor = request.getHeaders().getFirst("X-Forwarded-For");
-        if (xForwardedFor != null && !xForwardedFor.isEmpty()) {
-            return xForwardedFor.split(",")[0].trim();
-        }
-        
-        String xRealIp = request.getHeaders().getFirst("X-Real-IP");
-        if (xRealIp != null && !xRealIp.isEmpty()) {
-            return xRealIp;
-        }
-        
-        return request.getRemoteAddress() != null ? 
-            request.getRemoteAddress().getAddress().getHostAddress() : "unknown";
     }
     
     private boolean isAuthenticatedRequest(ServerHttpRequest request) {
@@ -119,29 +105,9 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
     
     private boolean isExcludedPath(String path) {
         return EXCLUDED_PATHS.stream()
-            .anyMatch(excluded -> path.startsWith(excluded));
+            .anyMatch(path::startsWith);
     }
-    
-    private Mono<Void> onError(ServerWebExchange exchange, String message, HttpStatus httpStatus) {
-        ServerHttpResponse response = exchange.getResponse();
-        response.setStatusCode(httpStatus);
-        
-        String errorResponse = String.format(
-            "{\"error\":\"%s\",\"message\":\"%s\",\"timestamp\":\"%s\"}",
-            httpStatus.getReasonPhrase(),
-            message,
-            java.time.Instant.now().toString()
-        );
-        
-        byte[] bytes = errorResponse.getBytes(StandardCharsets.UTF_8);
-        DataBuffer buffer = response.bufferFactory().wrap(bytes);
-        
-        response.getHeaders().add("Content-Type", "application/json");
-        response.getHeaders().add("Retry-After", "60"); // Suggest retry after 60 seconds
-        
-        return response.writeWith(Mono.just(buffer));
-    }
-    
+
     @Override
     public int getOrder() {
         return -99; // Execute after JWT filter but before other filters

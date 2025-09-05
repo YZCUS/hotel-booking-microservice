@@ -1,5 +1,6 @@
 package com.hotel.gateway.filter;
 
+import com.hotel.gateway.util.IpAddressUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
@@ -10,7 +11,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
-import java.time.Instant;
 import java.util.UUID;
 
 @Component
@@ -26,7 +26,7 @@ public class LoggingFilter implements GlobalFilter, Ordered {
         
         // Log request
         long startTime = System.currentTimeMillis();
-        String clientIp = getClientIp(request);
+        String clientIp = IpAddressUtil.getClientIpAddress(request);
         String userAgent = request.getHeaders().getFirst("User-Agent");
         String userId = request.getHeaders().getFirst("X-User-Id");
         
@@ -66,21 +66,6 @@ public class LoggingFilter implements GlobalFilter, Ordered {
                     throwable.getMessage()
                 );
             });
-    }
-    
-    private String getClientIp(ServerHttpRequest request) {
-        String xForwardedFor = request.getHeaders().getFirst("X-Forwarded-For");
-        if (xForwardedFor != null && !xForwardedFor.isEmpty()) {
-            return xForwardedFor.split(",")[0].trim();
-        }
-        
-        String xRealIp = request.getHeaders().getFirst("X-Real-IP");
-        if (xRealIp != null && !xRealIp.isEmpty()) {
-            return xRealIp;
-        }
-        
-        return request.getRemoteAddress() != null ? 
-            request.getRemoteAddress().getAddress().getHostAddress() : "unknown";
     }
     
     @Override
