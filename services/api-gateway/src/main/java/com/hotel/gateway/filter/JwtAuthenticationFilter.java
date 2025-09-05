@@ -24,7 +24,8 @@ import java.util.List;
 public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
     
     private final JwtUtil jwtUtil;
-    
+
+    // Paths that should not require authentication
     private static final List<String> EXCLUDED_PATHS = List.of(
         "/api/v1/auth/register",
         "/api/v1/auth/login",
@@ -36,7 +37,8 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         "/actuator/",
         "/fallback/"
     );
-    
+
+    // Paths that allow public read access
     private static final List<String> PUBLIC_READ_PATHS = List.of(
         "GET:/api/v1/hotels",
         "GET:/api/v1/search"
@@ -124,7 +126,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
     private String extractToken(ServerHttpRequest request) {
         List<String> authHeaders = request.getHeaders().get("Authorization");
         if (authHeaders != null && !authHeaders.isEmpty()) {
-            String authHeader = authHeaders.get(0);
+            String authHeader = authHeaders.getFirst();
             if (authHeader.startsWith("Bearer ")) {
                 return authHeader.substring(7);
             }
