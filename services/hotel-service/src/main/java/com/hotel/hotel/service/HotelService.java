@@ -7,7 +7,9 @@ import com.hotel.hotel.dto.SearchCriteria;
 import com.hotel.hotel.entity.Hotel;
 import com.hotel.hotel.entity.RoomType;
 import com.hotel.hotel.exception.HotelNotFoundException;
+import com.hotel.hotel.exception.RoomTypeNotFoundException;
 import com.hotel.hotel.repository.HotelRepository;
+import com.hotel.hotel.repository.RoomTypeRepository;
 import com.hotel.hotel.repository.UserFavoriteRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -36,6 +38,7 @@ public class HotelService {
     private final HotelRepository hotelRepository;
     private final UserFavoriteRepository favoriteRepository;
     private final RedisTemplate<String, Object> redisTemplate;
+    private final RoomTypeRepository roomTypeRepository;
     
     private static final String HOTEL_CACHE_KEY = "hotel:";
     private static final String SEARCH_CACHE_KEY = "search:";
@@ -62,6 +65,23 @@ public class HotelService {
     
     public Page<HotelResponse> searchHotels(SearchCriteria criteria, Pageable pageable) {
         return searchHotels(criteria, pageable, null);
+    }
+
+    @Transactional(readOnly = true)
+    public HotelResponse getHotelByRoomTypeId(UUID roomTypeId) {
+        log.debug("Finding hotel by room type id: {}", roomTypeId);
+
+        RoomType roomType = roomTypeRepository.findById(roomTypeId)
+                .orElseThrow(() -> new RoomTypeNotFoundException("Room type not found with id: " + roomTypeId));
+
+        // roomType.getHotel() null check (Lazy Loading)
+        Hotel hotel = roomType.getHotel();
+        if (hotel == null) {
+            throw new HotelNotFoundException("Hotel not found for room type id: " + roomTypeId);
+        }
+
+        // use mapToResponse with null userId
+        return mapToResponse(hotel, null);
     }
     
     public Page<HotelResponse> searchHotels(SearchCriteria criteria, Pageable pageable, UUID userId) {
@@ -228,7 +248,7 @@ public class HotelService {
                     .orElse(null);
         }
         
-        // Check if user has favorited this hotel
+        // Check if user has saved this hotel as favorite
         Boolean isFavorite = null;
         if (userId != null) {
             isFavorite = favoriteRepository.existsByUserIdAndHotelId(userId, hotel.getId());
@@ -276,7 +296,7 @@ public class HotelService {
     private void clearSearchCache() {
         try {
             Set<String> keys = redisTemplate.keys(SEARCH_CACHE_KEY + "*");
-            if (keys != null && !keys.isEmpty()) {
+            if (!keys.isEmpty()) {
                 redisTemplate.delete(keys);
                 log.info("Cleared {} search cache entries", keys.size());
             }

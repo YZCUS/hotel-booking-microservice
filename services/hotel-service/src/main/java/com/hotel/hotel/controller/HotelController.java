@@ -76,6 +76,14 @@ public class HotelController {
         List<RoomTypeResponse> rooms = roomService.getRoomsByHotelAndCapacity(hotelId, minCapacity);
         return ResponseEntity.ok(rooms);
     }
+
+    @GetMapping("/rooms/{roomTypeId}/hotel-details")
+    public ResponseEntity<HotelResponse> getHotelDetailsByRoomTypeId(@PathVariable UUID roomTypeId) {
+        log.info("Getting hotel details for room type: {}", roomTypeId);
+
+        HotelResponse hotel = hotelService.getHotelByRoomTypeId(roomTypeId);
+        return ResponseEntity.ok(hotel);
+    }
     
     @PostMapping
     @PreAuthorize("hasRole('ADMIN')")

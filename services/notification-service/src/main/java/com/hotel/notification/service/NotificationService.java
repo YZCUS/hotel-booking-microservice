@@ -3,7 +3,9 @@ package com.hotel.notification.service;
 import com.hotel.notification.dto.BookingConfirmationData;
 import com.hotel.notification.dto.HotelInfo;
 import com.hotel.notification.dto.UserInfo;
+import lombok.Getter;
 import lombok.RequiredArgsConstructor;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -118,7 +120,7 @@ public class NotificationService {
             
             // Get room type info which includes hotel details
             HotelInfo hotelInfo = webClient.get()
-                .uri("http://hotel-service:8082/api/v1/hotels/rooms/{roomTypeId}/hotel", roomTypeId)
+                .uri("http://hotel-service:8082/api/v1/hotels/rooms/{roomTypeId}/hotel-details", roomTypeId)
                 .retrieve()
                 .bodyToMono(HotelInfo.class)
                 .block();
@@ -138,7 +140,10 @@ public class NotificationService {
     }
     
     // Event classes - these would typically be in a shared library
+    @Getter
+    @Setter
     public static class BookingCreatedEvent {
+        // Getters and setters
         private UUID bookingId;
         private UUID userId;
         private UUID roomTypeId;
@@ -147,27 +152,12 @@ public class NotificationService {
         private Integer guests;
         private java.math.BigDecimal totalPrice;
         private LocalDateTime createdAt;
-        
-        // Getters and setters
-        public UUID getBookingId() { return bookingId; }
-        public void setBookingId(UUID bookingId) { this.bookingId = bookingId; }
-        public UUID getUserId() { return userId; }
-        public void setUserId(UUID userId) { this.userId = userId; }
-        public UUID getRoomTypeId() { return roomTypeId; }
-        public void setRoomTypeId(UUID roomTypeId) { this.roomTypeId = roomTypeId; }
-        public java.time.LocalDate getCheckInDate() { return checkInDate; }
-        public void setCheckInDate(java.time.LocalDate checkInDate) { this.checkInDate = checkInDate; }
-        public java.time.LocalDate getCheckOutDate() { return checkOutDate; }
-        public void setCheckOutDate(java.time.LocalDate checkOutDate) { this.checkOutDate = checkOutDate; }
-        public Integer getGuests() { return guests; }
-        public void setGuests(Integer guests) { this.guests = guests; }
-        public java.math.BigDecimal getTotalPrice() { return totalPrice; }
-        public void setTotalPrice(java.math.BigDecimal totalPrice) { this.totalPrice = totalPrice; }
-        public LocalDateTime getCreatedAt() { return createdAt; }
-        public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
     }
     
+    @Getter
+    @Setter
     public static class BookingCancelledEvent {
+        // Getters and setters
         private UUID bookingId;
         private UUID userId;
         private UUID roomTypeId;
@@ -176,26 +166,10 @@ public class NotificationService {
         private java.math.BigDecimal totalPrice;
         private LocalDateTime cancelledAt;
         private String reason;
-        
-        // Getters and setters
-        public UUID getBookingId() { return bookingId; }
-        public void setBookingId(UUID bookingId) { this.bookingId = bookingId; }
-        public UUID getUserId() { return userId; }
-        public void setUserId(UUID userId) { this.userId = userId; }
-        public UUID getRoomTypeId() { return roomTypeId; }
-        public void setRoomTypeId(UUID roomTypeId) { this.roomTypeId = roomTypeId; }
-        public java.time.LocalDate getCheckInDate() { return checkInDate; }
-        public void setCheckInDate(java.time.LocalDate checkInDate) { this.checkInDate = checkInDate; }
-        public java.time.LocalDate getCheckOutDate() { return checkOutDate; }
-        public void setCheckOutDate(java.time.LocalDate checkOutDate) { this.checkOutDate = checkOutDate; }
-        public java.math.BigDecimal getTotalPrice() { return totalPrice; }
-        public void setTotalPrice(java.math.BigDecimal totalPrice) { this.totalPrice = totalPrice; }
-        public LocalDateTime getCancelledAt() { return cancelledAt; }
-        public void setCancelledAt(LocalDateTime cancelledAt) { this.cancelledAt = cancelledAt; }
-        public String getReason() { return reason; }
-        public void setReason(String reason) { this.reason = reason; }
     }
-    
+
+    @Getter
+    @Setter
     public static class UserRegisteredEvent {
         private UUID userId;
         private String email;
@@ -203,23 +177,11 @@ public class NotificationService {
         private String lastName;
         private String fullName;
         private LocalDateTime registeredAt;
-        
-        // Getters and setters
-        public UUID getUserId() { return userId; }
-        public void setUserId(UUID userId) { this.userId = userId; }
-        public String getEmail() { return email; }
-        public void setEmail(String email) { this.email = email; }
-        public String getFirstName() { return firstName; }
-        public void setFirstName(String firstName) { this.firstName = firstName; }
-        public String getLastName() { return lastName; }
-        public void setLastName(String lastName) { this.lastName = lastName; }
-        public String getFullName() { 
+
+        public String getFullName() {
             if (fullName != null) return fullName;
             if (firstName != null && lastName != null) return firstName + " " + lastName;
             return firstName != null ? firstName : "Guest";
         }
-        public void setFullName(String fullName) { this.fullName = fullName; }
-        public LocalDateTime getRegisteredAt() { return registeredAt; }
-        public void setRegisteredAt(LocalDateTime registeredAt) { this.registeredAt = registeredAt; }
     }
 }
