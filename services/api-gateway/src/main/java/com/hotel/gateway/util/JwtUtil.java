@@ -46,7 +46,7 @@ public class JwtUtil {
                 .parseClaimsJws(token)
                 .getBody();
             
-            return claims.getSubject();
+            return claims.get("userId", String.class);
         } catch (Exception e) {
             log.error("Failed to extract user ID from JWT", e);
             return null;
@@ -61,7 +61,7 @@ public class JwtUtil {
                 .parseClaimsJws(token)
                 .getBody();
             
-            return claims.get("username", String.class);
+            return claims.getSubject();
         } catch (Exception e) {
             log.error("Failed to extract username from JWT", e);
             return null;
