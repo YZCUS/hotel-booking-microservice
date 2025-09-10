@@ -33,13 +33,5 @@ public class SearchCriteria {
     private BigDecimal latitude;
     private BigDecimal longitude;
     private Double radiusKm;
-    
-    @Override
-    public int hashCode() {
-        return java.util.Objects.hash(
-            city, country, minRating, maxRating, minPrice, maxPrice,
-            minCapacity, amenities, keyword, checkInDate, checkOutDate,
-            guests, latitude, longitude, radiusKm
-        );
-    }
+
 }

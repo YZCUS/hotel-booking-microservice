@@ -241,8 +241,8 @@ public class HotelService {
 
         List<RoomTypeResponse> roomTypes = hotel.getRoomTypes() != null ?
                 hotel.getRoomTypes().stream()
-                        .map(roomType -> roomService.mapRoomTypeToResponse(roomType, availabilityMap.getOrDefault(roomType.getId(), 0)))
-                        .collect(Collectors.toList()) : null;
+                        .map(roomType -> roomService.mapToResponse(roomType, availabilityMap.getOrDefault(roomType.getId(), 0)))
+                        .collect(Collectors.toList()) : Collections.emptyList();
         
         // Calculate price range
         BigDecimal minPrice = null;
