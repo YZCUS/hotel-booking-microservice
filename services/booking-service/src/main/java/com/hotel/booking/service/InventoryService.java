@@ -17,7 +17,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -141,6 +143,19 @@ public class InventoryService {
         log.debug("Availability check result: {} (min available: {})", available, minAvailable);
         
         return available;
+    }
+
+    @Transactional(readOnly = true)
+    public Map<UUID, Integer> getAvailableRoomsForTodayBatch(List<UUID> roomTypeIds) {
+        if (roomTypeIds == null || roomTypeIds.isEmpty()) {
+            return Map.of();
+        }
+        LocalDate today = LocalDate.now();
+        List<RoomInventory> inventories = inventoryRepository.findByRoomTypeIdInAndDate(roomTypeIds, today);
+
+        // Convert inventories to Map<roomTypeId, availableRooms>
+        return inventories.stream()
+                .collect(Collectors.toMap(RoomInventory::getRoomTypeId, RoomInventory::getAvailableRooms));
     }
     
     public void initializeInventory(UUID roomTypeId, int totalRooms, int daysAhead) {

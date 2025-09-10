@@ -24,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -38,6 +39,7 @@ public class HotelService {
     private final HotelRepository hotelRepository;
     private final UserFavoriteRepository favoriteRepository;
     private final RedisTemplate<String, Object> redisTemplate;
+    private final RoomService roomService;
     private final RoomTypeRepository roomTypeRepository;
     
     private static final String HOTEL_CACHE_KEY = "hotel:";
@@ -229,9 +231,17 @@ public class HotelService {
     }
     
     private HotelResponse mapToResponse(Hotel hotel, UUID userId) {
+        // get all room types for this hotel
+        List<UUID> roomTypeIds = hotel.getRoomTypes() != null ?
+                hotel.getRoomTypes().stream().map(RoomType::getId).collect(Collectors.toList()) :
+                List.of();
+
+        // get availability for each room type
+        Map<UUID, Integer> availabilityMap = roomService.getRoomAvailabilities(roomTypeIds);
+
         List<RoomTypeResponse> roomTypes = hotel.getRoomTypes() != null ?
                 hotel.getRoomTypes().stream()
-                        .map(this::mapRoomTypeToResponse)
+                        .map(roomType -> roomService.mapRoomTypeToResponse(roomType, availabilityMap.getOrDefault(roomType.getId(), 0)))
                         .collect(Collectors.toList()) : null;
         
         // Calculate price range

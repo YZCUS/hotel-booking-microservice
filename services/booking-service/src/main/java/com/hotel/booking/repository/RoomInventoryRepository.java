@@ -61,6 +61,8 @@ public interface RoomInventoryRepository extends JpaRepository<RoomInventory, UU
             @Param("startDate") LocalDate startDate,
             @Param("endDate") LocalDate endDate,
             @Param("requiredRooms") Integer requiredRooms);
-    
+
+    List<RoomInventory> findByRoomTypeIdInAndDate(List<UUID> roomTypeIds, LocalDate date);
+
     void deleteByRoomTypeId(UUID roomTypeId);
 }

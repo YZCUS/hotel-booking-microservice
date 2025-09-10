@@ -8,6 +8,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @RestController
@@ -30,6 +32,13 @@ public class InventoryController {
         
         boolean available = inventoryService.checkAvailability(roomTypeId, checkInDate, checkOutDate, rooms);
         return ResponseEntity.ok(available);
+    }
+
+    @PostMapping("/availabilities-for-today")
+    public ResponseEntity<Map<UUID, Integer>> getAvailableRoomsForTodayBatch(@RequestBody List<UUID> roomTypeIds) {
+        log.info("Checking today's availability for {} room types", roomTypeIds.size());
+        Map<UUID, Integer> availabilities = inventoryService.getAvailableRoomsForTodayBatch(roomTypeIds);
+        return ResponseEntity.ok(availabilities);
     }
     
     @PostMapping("/initialize")

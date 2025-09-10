@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -76,6 +77,15 @@ public class RoomService {
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }
+
+    public Map<UUID, Integer> getRoomAvailabilities(List<UUID> roomTypeIds) {
+        if (roomTypeIds == null || roomTypeIds.isEmpty()) {
+            return Map.of();
+        }
+        // block() 是為了在事務性方法中簡化處理，更好的做法是讓整個鏈路都反應式
+        return inventoryService.getAvailableRoomsForTodayBatch(roomTypeIds).block();
+    }
+
     
     public RoomTypeResponse createRoom(UUID hotelId, RoomTypeRequest request) {
         log.info("Creating new room type for hotel: {}", hotelId);
@@ -146,11 +156,8 @@ public class RoomService {
         
         // TODO: Publish InventoryInitializedEvent or call Inventory Service
     }
-    
-    private RoomTypeResponse mapToResponse(RoomType roomType) {
-        // Get real-time availability for today
-        Integer availableRooms = inventoryService.getAvailableRoomsForToday(roomType.getId());
-        
+
+    public RoomTypeResponse mapToResponse(RoomType roomType, Integer availableRooms) {
         return RoomTypeResponse.builder()
                 .id(roomType.getId())
                 .hotelId(roomType.getHotel().getId())
@@ -161,8 +168,14 @@ public class RoomService {
                 .pricePerNight(roomType.getPricePerNight())
                 .totalInventory(roomType.getTotalInventory())
                 .createdAt(roomType.getCreatedAt())
-                .availableRooms(availableRooms)
+                .availableRooms(availableRooms) // 使用傳入的庫存
                 .isAvailable(availableRooms != null && availableRooms > 0)
                 .build();
+    }
+    
+    private RoomTypeResponse mapToResponse(RoomType roomType) {
+        // Get real-time availability for today
+        Integer availableRooms = inventoryService.getAvailableRoomsForToday(roomType.getId());
+        return mapToResponse(roomType, availableRooms);
     }
 }
