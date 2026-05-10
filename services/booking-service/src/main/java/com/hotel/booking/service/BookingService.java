@@ -136,11 +136,17 @@ public class BookingService {
         maxAttempts = MAX_RETRY_ATTEMPTS,
         backoff = @Backoff(delay = 100, multiplier = 2)
     )
+    @Transactional(rollbackFor = Exception.class, isolation = Isolation.READ_COMMITTED)
     public BookingResponse cancelBooking(UUID bookingId, UUID userId) {
         log.info("Cancelling booking: {} for user: {}", bookingId, userId);
         
-        Booking booking = bookingRepository.findByIdAndUserId(bookingId, userId)
+        Booking booking = bookingRepository.findByIdAndUserIdForUpdate(bookingId, userId)
             .orElseThrow(() -> new BookingNotFoundException("Booking not found"));
+
+        if (booking.getStatus() == BookingStatus.CANCELLED) {
+            log.info("Booking {} already cancelled; returning idempotent response", bookingId);
+            return mapToResponse(booking);
+        }
         
         if (booking.getStatus() != BookingStatus.CONFIRMED) {
             throw new BookingConflictException("Only confirmed bookings can be cancelled");

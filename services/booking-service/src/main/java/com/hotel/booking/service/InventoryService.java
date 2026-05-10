@@ -7,6 +7,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
@@ -28,6 +30,7 @@ import java.util.stream.Collectors;
 public class InventoryService {
     
     private final RoomInventoryRepository inventoryRepository;
+    private final CacheManager cacheManager;
     
     @Retryable(
         value = {OptimisticLockingFailureException.class},
@@ -35,7 +38,6 @@ public class InventoryService {
         backoff = @Backoff(delay = 100, multiplier = 2)
     )
     @Transactional(isolation = Isolation.SERIALIZABLE)
-    @CacheEvict(value = "room-availability", allEntries = true, beforeInvocation = false)
     public boolean reserveInventory(UUID roomTypeId, LocalDate checkIn, LocalDate checkOut, int rooms) {
         log.info("Reserving {} rooms for roomType {} from {} to {}", 
             rooms, roomTypeId, checkIn, checkOut);
@@ -77,6 +79,7 @@ public class InventoryService {
             
             log.info("Successfully reserved {} rooms for roomType {} from {} to {}", 
                 rooms, roomTypeId, checkIn, checkOut);
+            evictAvailabilityKeys(roomTypeId, checkIn, checkOut);
             return true;
             
         } catch (OptimisticLockingFailureException e) {
@@ -91,7 +94,6 @@ public class InventoryService {
         backoff = @Backoff(delay = 100, multiplier = 2)
     )
     @Transactional(isolation = Isolation.SERIALIZABLE)
-    @CacheEvict(value = "room-availability", allEntries = true, beforeInvocation = false)
     public void releaseInventory(UUID roomTypeId, LocalDate checkIn, LocalDate checkOut, int rooms) {
         log.info("Releasing {} rooms for roomType {} from {} to {}", 
             rooms, roomTypeId, checkIn, checkOut);
@@ -121,6 +123,7 @@ public class InventoryService {
             
             log.info("Successfully released {} rooms for roomType {} from {} to {}", 
                 rooms, roomTypeId, checkIn, checkOut);
+            evictAvailabilityKeys(roomTypeId, checkIn, checkOut);
                 
         } catch (OptimisticLockingFailureException e) {
             log.error("Optimistic lock failure when releasing inventory for roomType: {}", roomTypeId);
@@ -170,9 +173,9 @@ public class InventoryService {
             .findByRoomTypeIdAndDateBetween(roomTypeId, startDate, endDate);
         
         // Create a set of existing dates for fast lookup
-        List<LocalDate> existingDates = existingInventories.stream()
+        java.util.Set<LocalDate> existingDates = existingInventories.stream()
             .map(RoomInventory::getDate)
-            .toList();
+            .collect(Collectors.toSet());
         
         // Batch create non-existing inventory records
         List<RoomInventory> newInventories = new ArrayList<>();
@@ -213,5 +216,19 @@ public class InventoryService {
         }
         
         return dates;
+    }
+
+    private void evictAvailabilityKeys(UUID roomTypeId, LocalDate checkIn, LocalDate checkOut) {
+        Cache cache = cacheManager.getCache("room-availability");
+        if (cache == null) {
+            return;
+        }
+
+        // Keys follow: roomTypeId_checkIn_checkOut_rooms
+        // Evict common request sizes to avoid global eviction churn.
+        for (int rooms = 1; rooms <= 4; rooms++) {
+            String key = roomTypeId + "_" + checkIn + "_" + checkOut + "_" + rooms;
+            cache.evict(key);
+        }
     }
 }
