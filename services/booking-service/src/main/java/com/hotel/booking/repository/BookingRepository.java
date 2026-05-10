@@ -5,6 +5,7 @@ import com.hotel.booking.entity.BookingStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -13,6 +14,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import jakarta.persistence.LockModeType;
 
 @Repository
 public interface BookingRepository extends JpaRepository<Booking, UUID> {
@@ -20,6 +22,10 @@ public interface BookingRepository extends JpaRepository<Booking, UUID> {
     Page<Booking> findByUserId(UUID userId, Pageable pageable);
     
     Optional<Booking> findByIdAndUserId(UUID id, UUID userId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT b FROM Booking b WHERE b.id = :id AND b.userId = :userId")
+    Optional<Booking> findByIdAndUserIdForUpdate(@Param("id") UUID id, @Param("userId") UUID userId);
     
     List<Booking> findByUserIdAndStatus(UUID userId, BookingStatus status);
     

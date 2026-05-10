@@ -124,6 +124,55 @@ Single PostgreSQL database with service-specific schemas:
 ./gradlew :services:user-service:bootRun
 ```
 
+
+## Demo-Ready Quick Walkthrough
+
+1. Start stack: `make dev`
+2. Wait for health checks: `make health`
+3. Register and login through gateway:
+   - `POST /api/v1/auth/register`
+   - `POST /api/v1/auth/login`
+4. List hotels: `GET /api/v1/hotels`
+5. Create booking: `POST /api/v1/bookings`
+6. Cancel booking (outside 24h check-in window): `PUT /api/v1/bookings/{id}/cancel`
+
+> Note: A frontend website is not included in this repository. For UI demos, connect an external frontend to the API gateway at `http://localhost:8080`.
+
+## Architecture Documentation
+
+- Detailed architecture and migration guidance: `docs/architecture.md`
+- Current local setup uses a shared PostgreSQL instance with service-specific schemas.
+- Recommended production direction is service-owned databases and API/event-only integration.
+
+## Local Setup (Without Docker)
+
+Prerequisites:
+- Java 21
+- Gradle 8+
+- PostgreSQL 15
+- Redis 7
+- RabbitMQ 3
+- Meilisearch 1.x
+
+Run services individually:
+```bash
+./gradlew :services:user-service:bootRun
+./gradlew :services:hotel-service:bootRun
+./gradlew :services:booking-service:bootRun
+./gradlew :services:search-service:bootRun
+./gradlew :services:notification-service:bootRun
+./gradlew :services:api-gateway:bootRun
+```
+
+## Testing Strategy (TDD-oriented)
+
+- Write/adjust failing tests first for bug fixes and edge cases.
+- Focus test layers:
+  - unit tests for services and business rules
+  - integration tests for locking/retry behavior
+- Run all tests: `./gradlew test`
+- Run booking service tests only: `./gradlew :services:booking-service:test`
+
 ## API Endpoints
 
 All endpoints are accessed through the API Gateway at `http://localhost:8080/api/v1/`

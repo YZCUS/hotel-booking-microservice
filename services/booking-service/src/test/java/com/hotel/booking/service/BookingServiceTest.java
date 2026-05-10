@@ -16,6 +16,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -40,6 +41,9 @@ class BookingServiceTest {
 
     @Mock
     private EventPublisher eventPublisher;
+
+    @Mock
+    private ApplicationEventPublisher applicationEventPublisher;
 
     @InjectMocks
     private BookingService bookingService;
@@ -203,14 +207,16 @@ class BookingServiceTest {
     }
 
     @Test
-    void cancelBooking_AlreadyCancelled() {
+    void cancelBooking_AlreadyCancelled_Idempotent() {
         // Given
         booking.setStatus(BookingStatus.CANCELLED);
         when(bookingRepository.findByIdAndUserId(bookingId, userId)).thenReturn(Optional.of(booking));
 
         // When & Then
-        assertThrows(BookingConflictException.class, 
-                () -> bookingService.cancelBooking(bookingId, userId));
+        BookingResponse response = bookingService.cancelBooking(bookingId, userId);
+        assertNotNull(response);
+        assertEquals(BookingStatus.CANCELLED, response.getStatus());
+        verify(inventoryService, never()).releaseInventory(any(), any(), any(), anyInt());
     }
 
     @Test
