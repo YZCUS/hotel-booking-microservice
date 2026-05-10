@@ -6,6 +6,10 @@ import com.hotel.hotel.dto.RoomTypeResponse;
 import com.hotel.hotel.dto.SearchCriteria;
 import com.hotel.hotel.entity.Hotel;
 import com.hotel.hotel.entity.RoomType;
+import com.hotel.hotel.event.EventPublisher;
+import com.hotel.hotel.event.HotelCreatedEvent;
+import com.hotel.hotel.event.HotelDeletedEvent;
+import com.hotel.hotel.event.HotelUpdatedEvent;
 import com.hotel.hotel.exception.HotelNotFoundException;
 import com.hotel.hotel.exception.RoomTypeNotFoundException;
 import com.hotel.hotel.repository.HotelRepository;
@@ -18,13 +22,13 @@ import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
 import java.util.*;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Service
@@ -35,13 +39,9 @@ public class HotelService {
     
     private final HotelRepository hotelRepository;
     private final UserFavoriteRepository favoriteRepository;
-    private final RedisTemplate<String, Object> redisTemplate;
     private final RoomService roomService;
     private final RoomTypeRepository roomTypeRepository;
-    
-    private static final String HOTEL_CACHE_KEY = "hotel:";
-    private static final String SEARCH_CACHE_KEY = "search:";
-    private static final int CACHE_TTL_MINUTES = 10;
+    private final EventPublisher eventPublisher;
     
     @Cacheable(value = "hotels", key = "#hotelId")
     public HotelResponse getHotelById(UUID hotelId) {
@@ -85,44 +85,12 @@ public class HotelService {
     
     public Page<HotelResponse> searchHotels(SearchCriteria criteria, Pageable pageable, UUID userId) {
         log.info("Searching hotels with criteria: {}", criteria);
-        
-        String cacheKey = SEARCH_CACHE_KEY + criteria.hashCode() + ":" + pageable.hashCode();
-        
-        // Check cache with safe type checking
-        if (userId == null) { // Only use cache for anonymous users
-            try {
-                Object cachedObject = redisTemplate.opsForValue().get(cacheKey);
-                if (cachedObject instanceof Page<?>) {
-                    @SuppressWarnings("unchecked")
-                    Page<HotelResponse> cached = (Page<HotelResponse>) cachedObject;
-                    log.debug("Found cached search results");
-                    return cached;
-                }
-            } catch (Exception e) {
-                log.warn("Failed to retrieve from cache, proceeding with database query: {}", e.getMessage());
-                // Remove corrupted cache entry
-                redisTemplate.delete(cacheKey);
-            }
-        }
-        
+
         // Build dynamic query specification
         Specification<Hotel> spec = buildSearchSpecification(criteria);
         
         Page<Hotel> hotels = hotelRepository.findAll(spec, pageable);
-        Page<HotelResponse> response = hotels.map(hotel -> mapToResponse(hotel, userId));
-        
-        // Cache results for anonymous users only (10 minutes) with error handling
-        if (userId == null) {
-            try {
-                redisTemplate.opsForValue().set(cacheKey, response, CACHE_TTL_MINUTES, TimeUnit.MINUTES);
-                log.debug("Cached search results for key: {}", cacheKey);
-            } catch (Exception e) {
-                log.warn("Failed to cache search results: {}", e.getMessage());
-                // Continue execution even if caching fails
-            }
-        }
-        
-        return response;
+        return hotels.map(hotel -> mapToResponse(hotel, userId));
     }
     
     public HotelResponse createHotel(HotelRequest request) {
@@ -142,8 +110,7 @@ public class HotelService {
         
         Hotel saved = hotelRepository.save(hotel);
         
-        // Clear search cache
-        clearSearchCache();
+        publishAfterCommit(() -> eventPublisher.publishHotelCreated(toHotelCreatedEvent(saved)));
         
         return mapToResponse(saved, null);
     }
@@ -167,7 +134,7 @@ public class HotelService {
         
         Hotel updated = hotelRepository.save(hotel);
         
-        clearSearchCache();
+        publishAfterCommit(() -> eventPublisher.publishHotelUpdated(toHotelUpdatedEvent(updated)));
         
         return mapToResponse(updated, null);
     }
@@ -180,7 +147,8 @@ public class HotelService {
                 .orElseThrow(() -> new HotelNotFoundException("Hotel not found"));
         
         hotelRepository.delete(hotel);
-        clearSearchCache();
+        publishAfterCommit(() -> eventPublisher.publishHotelDeleted(
+                HotelDeletedEvent.builder().hotelId(hotel.getId()).build()));
     }
     
     public List<String> getAllCities() {
@@ -300,15 +268,58 @@ public class HotelService {
                 .build();
     }
     
-    private void clearSearchCache() {
-        try {
-            Set<String> keys = redisTemplate.keys(SEARCH_CACHE_KEY + "*");
-            if (!keys.isEmpty()) {
-                redisTemplate.delete(keys);
-                log.info("Cleared {} search cache entries", keys.size());
-            }
-        } catch (Exception e) {
-            log.error("Error clearing search cache", e);
+    private void publishAfterCommit(Runnable publisher) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            publisher.run();
+            return;
         }
+
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    publisher.run();
+                } catch (Exception e) {
+                    log.error("Failed to publish hotel event after commit", e);
+                }
+            }
+        });
+    }
+
+    private HotelCreatedEvent toHotelCreatedEvent(Hotel hotel) {
+        return HotelCreatedEvent.builder()
+                .hotelId(hotel.getId())
+                .name(hotel.getName())
+                .description(hotel.getDescription())
+                .city(hotel.getCity())
+                .country(hotel.getCountry())
+                .address(hotel.getAddress())
+                .starRating(hotel.getStarRating())
+                .amenities(hotel.getAmenities())
+                .latitude(toDouble(hotel.getLatitude()))
+                .longitude(toDouble(hotel.getLongitude()))
+                .imageUrls(List.of())
+                .build();
+    }
+
+    private HotelUpdatedEvent toHotelUpdatedEvent(Hotel hotel) {
+        return HotelUpdatedEvent.builder()
+                .hotelId(hotel.getId())
+                .name(hotel.getName())
+                .description(hotel.getDescription())
+                .city(hotel.getCity())
+                .country(hotel.getCountry())
+                .address(hotel.getAddress())
+                .starRating(hotel.getStarRating())
+                .amenities(hotel.getAmenities())
+                .latitude(toDouble(hotel.getLatitude()))
+                .longitude(toDouble(hotel.getLongitude()))
+                .imageUrls(List.of())
+                .isActive(true)
+                .build();
+    }
+
+    private Double toDouble(BigDecimal value) {
+        return value == null ? null : value.doubleValue();
     }
 }

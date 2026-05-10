@@ -4,6 +4,7 @@ import com.hotel.user.dto.JwtResponse;
 import com.hotel.user.dto.LoginRequest;
 import com.hotel.user.dto.RegisterRequest;
 import com.hotel.user.entity.User;
+import com.hotel.user.event.EventPublisher;
 import com.hotel.user.exception.EmailAlreadyExistsException;
 import com.hotel.user.repository.UserRepository;
 import com.hotel.user.util.JwtUtil;
@@ -40,6 +41,9 @@ class AuthServiceTest {
     
     @Mock
     private JwtUtil jwtUtil;
+
+    @Mock
+    private EventPublisher eventPublisher;
     
     @InjectMocks
     private AuthService authService;
@@ -85,6 +89,7 @@ class AuthServiceTest {
         verify(passwordEncoder).encode(request.getPassword());
         verify(userRepository).save(any(User.class));
         verify(jwtUtil).generateToken(testUser.getEmail(), testUser.getId());
+        verify(eventPublisher).publishUserRegistered(any());
     }
     
     @Test

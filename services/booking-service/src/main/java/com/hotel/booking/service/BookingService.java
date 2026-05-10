@@ -22,10 +22,9 @@ import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.event.TransactionPhase;
-import org.springframework.transaction.event.TransactionalEventListener;
-import org.springframework.context.ApplicationEventPublisher;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -43,7 +42,6 @@ public class BookingService {
     private final InventoryService inventoryService;
     private final PricingService pricingService;
     private final EventPublisher eventPublisher;
-    private final ApplicationEventPublisher applicationEventPublisher;
     
     private static final int MAX_RETRY_ATTEMPTS = 3;
     
@@ -61,9 +59,8 @@ public class BookingService {
         validateBookingDates(request.getCheckInDate(), request.getCheckOutDate());
         
         // Check and reserve inventory (with optimistic locking)
-        boolean inventoryReserved = false;
         try {
-            inventoryReserved = inventoryService.reserveInventory(
+            boolean inventoryReserved = inventoryService.reserveInventory(
                 request.getRoomTypeId(),
                 request.getCheckInDate(),
                 request.getCheckOutDate(),
@@ -94,8 +91,17 @@ public class BookingService {
             
             Booking saved = bookingRepository.save(booking);
             
-            // Publish domain event, will be processed after transaction commit
-            applicationEventPublisher.publishEvent(saved);
+            BookingCreatedEvent event = BookingCreatedEvent.builder()
+                .bookingId(saved.getId())
+                .userId(saved.getUserId())
+                .roomTypeId(saved.getRoomTypeId())
+                .checkInDate(saved.getCheckInDate())
+                .checkOutDate(saved.getCheckOutDate())
+                .guests(saved.getGuests())
+                .totalPrice(saved.getTotalPrice())
+                .createdAt(saved.getCreatedAt() != null ? saved.getCreatedAt() : LocalDateTime.now())
+                .build();
+            publishAfterCommit(() -> eventPublisher.publishBookingCreated(event));
             
             log.info("Successfully created booking: {} for user: {}", saved.getId(), request.getUserId());
             return mapToResponse(saved);
@@ -103,22 +109,6 @@ public class BookingService {
         } catch (OptimisticLockingFailureException e) {
             log.warn("Optimistic lock failure during booking creation, retrying... Attempt: {}", e.getMessage());
             throw e;  // Let @Retryable handle retry
-        } catch (Exception e) {
-            // If booking fails, release reserved inventory
-            if (inventoryReserved) {
-                try {
-                    inventoryService.releaseInventory(
-                        request.getRoomTypeId(),
-                        request.getCheckInDate(),
-                        request.getCheckOutDate(),
-                        1
-                    );
-                    log.info("Released inventory due to booking failure");
-                } catch (Exception releaseEx) {
-                    log.error("Failed to release inventory after booking failure", releaseEx);
-                }
-            }
-            throw e;
         }
     }
     
@@ -153,7 +143,7 @@ public class BookingService {
         }
         
         // Check cancellation policy (24 hours before check-in)
-        if (booking.getCheckInDate().minusDays(1).isBefore(LocalDate.now())) {
+        if (!canCancel(booking)) {
             throw new BookingConflictException("Cannot cancel booking within 24 hours of check-in");
         }
         
@@ -170,8 +160,17 @@ public class BookingService {
                 1
             );
             
-            // Publish domain event, consistent with BookingCreated
-            applicationEventPublisher.publishEvent(updated);
+            BookingCancelledEvent event = BookingCancelledEvent.builder()
+                .bookingId(updated.getId())
+                .userId(updated.getUserId())
+                .roomTypeId(updated.getRoomTypeId())
+                .checkInDate(updated.getCheckInDate())
+                .checkOutDate(updated.getCheckOutDate())
+                .totalPrice(updated.getTotalPrice())
+                .cancelledAt(LocalDateTime.now())
+                .reason("User cancellation")
+                .build();
+            publishAfterCommit(() -> eventPublisher.publishBookingCancelled(event));
             
             log.info("Successfully cancelled booking: {}", bookingId);
             return mapToResponse(updated);
@@ -266,67 +265,28 @@ public class BookingService {
         }
     }
     
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    public void handleBookingCreated(Booking booking) {
-        log.info("Handling booking created event for booking: {}", booking.getId());
-        
-        try {
-            BookingCreatedEvent event = BookingCreatedEvent.builder()
-                .bookingId(booking.getId())
-                .userId(booking.getUserId())
-                .roomTypeId(booking.getRoomTypeId())
-                .checkInDate(booking.getCheckInDate())
-                .checkOutDate(booking.getCheckOutDate())
-                .guests(booking.getGuests())
-                .totalPrice(booking.getTotalPrice())
-                .createdAt(booking.getCreatedAt())
-                .build();
-            
-            eventPublisher.publishBookingCreated(event);
-            log.info("Successfully published booking created event for booking: {}", booking.getId());
-            
-        } catch (Exception e) {
-            log.error("Failed to publish booking created event for booking: {}", booking.getId(), e);
-            // Event publishing failure will not affect committed booking
-            // Consider implementing retry mechanism or storing failed events for later retry
-        }
-    }
-    
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    public void handleBookingCancelled(Booking booking) {
-        // Only process cancelled bookings
-        if (booking.getStatus() != BookingStatus.CANCELLED) {
+    private void publishAfterCommit(Runnable publisher) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            publisher.run();
             return;
         }
-        
-        log.info("Handling booking cancelled event for booking: {}", booking.getId());
-        
-        try {
-            BookingCancelledEvent event = BookingCancelledEvent.builder()
-                .bookingId(booking.getId())
-                .userId(booking.getUserId())
-                .roomTypeId(booking.getRoomTypeId())
-                .checkInDate(booking.getCheckInDate())
-                .checkOutDate(booking.getCheckOutDate())
-                .totalPrice(booking.getTotalPrice())
-                .cancelledAt(LocalDateTime.now())
-                .reason("User cancellation")
-                .build();
-            
-            eventPublisher.publishBookingCancelled(event);
-            log.info("Successfully published booking cancelled event for booking: {}", booking.getId());
-            
-        } catch (Exception e) {
-            log.error("Failed to publish booking cancelled event for booking: {}", booking.getId(), e);
-            // Event publishing failure will not affect committed cancellation
-        }
+
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    publisher.run();
+                } catch (Exception e) {
+                    log.error("Failed to publish booking event after commit", e);
+                }
+            }
+        });
     }
     
     private BookingResponse mapToResponse(Booking booking) {
         int numberOfNights = (int) ChronoUnit.DAYS.between(booking.getCheckInDate(), booking.getCheckOutDate());
         
-        boolean canCancel = booking.getStatus() == BookingStatus.CONFIRMED && 
-                           booking.getCheckInDate().minusDays(1).isAfter(LocalDate.now());
+        boolean canCancel = booking.getStatus() == BookingStatus.CONFIRMED && canCancel(booking);
         
         boolean canCheckIn = booking.getStatus() == BookingStatus.CONFIRMED &&
                             booking.getCheckInDate().equals(LocalDate.now());
@@ -348,5 +308,10 @@ public class BookingService {
             .canCancel(canCancel)
             .canCheckIn(canCheckIn)
             .build();
+    }
+
+    private boolean canCancel(Booking booking) {
+        LocalDate lastCancellationDate = booking.getCheckInDate().minusDays(1);
+        return !LocalDate.now().isAfter(lastCancellationDate);
     }
 }

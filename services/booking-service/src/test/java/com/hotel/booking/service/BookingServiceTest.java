@@ -16,7 +16,6 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.OptimisticLockingFailureException;
-import org.springframework.context.ApplicationEventPublisher;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -41,9 +40,6 @@ class BookingServiceTest {
 
     @Mock
     private EventPublisher eventPublisher;
-
-    @Mock
-    private ApplicationEventPublisher applicationEventPublisher;
 
     @InjectMocks
     private BookingService bookingService;
@@ -181,7 +177,7 @@ class BookingServiceTest {
     void cancelBooking_Success() {
         // Given
         booking.setCheckInDate(LocalDate.now().plusDays(2)); // More than 24 hours ahead
-        when(bookingRepository.findByIdAndUserId(bookingId, userId)).thenReturn(Optional.of(booking));
+        when(bookingRepository.findByIdAndUserIdForUpdate(bookingId, userId)).thenReturn(Optional.of(booking));
         when(bookingRepository.save(any(Booking.class))).thenReturn(booking);
 
         // When
@@ -189,17 +185,18 @@ class BookingServiceTest {
 
         // Then
         assertNotNull(response);
-        verify(bookingRepository).findByIdAndUserId(bookingId, userId);
+        verify(bookingRepository).findByIdAndUserIdForUpdate(bookingId, userId);
         verify(inventoryService).releaseInventory(roomTypeId, booking.getCheckInDate(), 
                 booking.getCheckOutDate(), 1);
         verify(eventPublisher).publishBookingCancelled(any());
+        verify(eventPublisher, never()).publishBookingCreated(any());
     }
 
     @Test
     void cancelBooking_TooLateToCancel() {
         // Given
         booking.setCheckInDate(LocalDate.now()); // Same day - within 24 hours
-        when(bookingRepository.findByIdAndUserId(bookingId, userId)).thenReturn(Optional.of(booking));
+        when(bookingRepository.findByIdAndUserIdForUpdate(bookingId, userId)).thenReturn(Optional.of(booking));
 
         // When & Then
         assertThrows(BookingConflictException.class, 
@@ -210,7 +207,7 @@ class BookingServiceTest {
     void cancelBooking_AlreadyCancelled_Idempotent() {
         // Given
         booking.setStatus(BookingStatus.CANCELLED);
-        when(bookingRepository.findByIdAndUserId(bookingId, userId)).thenReturn(Optional.of(booking));
+        when(bookingRepository.findByIdAndUserIdForUpdate(bookingId, userId)).thenReturn(Optional.of(booking));
 
         // When & Then
         BookingResponse response = bookingService.cancelBooking(bookingId, userId);
@@ -223,7 +220,7 @@ class BookingServiceTest {
     void cancelBooking_OptimisticLockingFailure() {
         // Given
         booking.setCheckInDate(LocalDate.now().plusDays(2));
-        when(bookingRepository.findByIdAndUserId(bookingId, userId)).thenReturn(Optional.of(booking));
+        when(bookingRepository.findByIdAndUserIdForUpdate(bookingId, userId)).thenReturn(Optional.of(booking));
         when(bookingRepository.save(any(Booking.class)))
                 .thenThrow(new OptimisticLockingFailureException("Version mismatch"));
 
@@ -233,7 +230,7 @@ class BookingServiceTest {
     }
 
     @Test
-    void createBooking_FailureWithInventoryCleanup() {
+    void createBooking_FailureRollsBackTransactionWithoutManualInventoryRelease() {
         // Given
         when(inventoryService.reserveInventory(any(), any(), any(), eq(1))).thenReturn(true);
         when(pricingService.calculateTotalPrice(any(), any(), any())).thenReturn(BigDecimal.valueOf(200));
@@ -242,8 +239,6 @@ class BookingServiceTest {
         // When & Then
         assertThrows(RuntimeException.class, () -> bookingService.createBooking(bookingRequest));
         
-        // Verify inventory is released on failure
-        verify(inventoryService).releaseInventory(roomTypeId, bookingRequest.getCheckInDate(), 
-                bookingRequest.getCheckOutDate(), 1);
+        verify(inventoryService, never()).releaseInventory(any(), any(), any(), anyInt());
     }
 }

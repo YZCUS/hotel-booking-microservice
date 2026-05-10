@@ -17,6 +17,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -50,9 +51,11 @@ class PricingServiceTest {
                 .build();
                 
         when(webClientBuilder.build()).thenReturn(webClient);
+        when(webClientBuilder.baseUrl(nullable(String.class))).thenReturn(webClientBuilder);
         when(webClient.get()).thenReturn(requestHeadersUriSpec);
         when(requestHeadersUriSpec.uri(anyString(), any(UUID.class))).thenReturn(requestHeadersUriSpec);
         when(requestHeadersUriSpec.retrieve()).thenReturn(responseSpec);
+        when(responseSpec.onStatus(any(), any())).thenReturn(responseSpec);
         when(responseSpec.bodyToMono(RoomTypeResponse.class)).thenReturn(Mono.just(mockResponse));
     }
 
@@ -121,6 +124,9 @@ class PricingServiceTest {
     void calculateTotalPrice_AdvanceBooking() {
         // Given - Booking 35 days in advance
         LocalDate checkIn = LocalDate.now().plusDays(35);
+        while (isSeasonal(checkIn) || checkIn.getDayOfWeek().getValue() > 3) {
+            checkIn = checkIn.plusDays(1);
+        }
         LocalDate checkOut = checkIn.plusDays(2);
 
         // When
@@ -180,5 +186,10 @@ class PricingServiceTest {
         // Weekend premium applied = $460 (actual weekend calculation result)
         // Winter season (January): 25% premium = $460 * 1.25 = $575
         assertEquals(0, totalPrice.compareTo(BigDecimal.valueOf(575.00)));
+    }
+
+    private boolean isSeasonal(LocalDate date) {
+        int month = date.getMonthValue();
+        return (month >= 6 && month <= 8) || month == 12 || month <= 2;
     }
 }

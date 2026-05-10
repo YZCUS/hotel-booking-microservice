@@ -9,9 +9,12 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.dao.OptimisticLockingFailureException;
 
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -24,6 +27,12 @@ class InventoryServiceTest {
 
     @Mock
     private RoomInventoryRepository inventoryRepository;
+
+    @Mock
+    private CacheManager cacheManager;
+
+    @Mock
+    private Cache availabilityCache;
 
     @InjectMocks
     private InventoryService inventoryService;
@@ -58,12 +67,11 @@ class InventoryServiceTest {
     @Test
     void reserveInventory_Success() {
         // Given
-        when(inventoryRepository.findByRoomTypeIdAndDate(roomTypeId, checkIn))
-                .thenReturn(Optional.of(inventory1));
-        when(inventoryRepository.findByRoomTypeIdAndDate(roomTypeId, checkIn.plusDays(1)))
-                .thenReturn(Optional.of(inventory2));
+        when(inventoryRepository.findByRoomTypeIdAndDateRangeForUpdate(roomTypeId, checkIn, checkOut.minusDays(1)))
+                .thenReturn(List.of(inventory1, inventory2));
         when(inventoryRepository.save(any(RoomInventory.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
+        when(cacheManager.getCache("room-availability")).thenReturn(availabilityCache);
 
         // When
         boolean result = inventoryService.reserveInventory(roomTypeId, checkIn, checkOut, 2);
@@ -71,6 +79,7 @@ class InventoryServiceTest {
         // Then
         assertTrue(result);
         verify(inventoryRepository, times(2)).save(any(RoomInventory.class));
+        verify(availabilityCache).clear();
         assertEquals(3, inventory1.getAvailableRooms());
         assertEquals(3, inventory2.getAvailableRooms());
     }
@@ -79,8 +88,8 @@ class InventoryServiceTest {
     void reserveInventory_InsufficientRooms() {
         // Given
         inventory1.setAvailableRooms(1); // Not enough rooms
-        when(inventoryRepository.findByRoomTypeIdAndDate(roomTypeId, checkIn))
-                .thenReturn(Optional.of(inventory1));
+        when(inventoryRepository.findByRoomTypeIdAndDateRangeForUpdate(roomTypeId, checkIn, checkOut.minusDays(1)))
+                .thenReturn(List.of(inventory1, inventory2));
 
         // When
         boolean result = inventoryService.reserveInventory(roomTypeId, checkIn, checkOut, 2);
@@ -93,21 +102,21 @@ class InventoryServiceTest {
     @Test
     void reserveInventory_InventoryNotFound() {
         // Given
-        when(inventoryRepository.findByRoomTypeIdAndDate(roomTypeId, checkIn))
-                .thenReturn(Optional.empty());
+        when(inventoryRepository.findByRoomTypeIdAndDateRangeForUpdate(roomTypeId, checkIn, checkOut.minusDays(1)))
+                .thenReturn(List.of());
 
-        // When & Then
-        assertThrows(InventoryNotFoundException.class, 
-                () -> inventoryService.reserveInventory(roomTypeId, checkIn, checkOut, 1));
+        // When
+        boolean result = inventoryService.reserveInventory(roomTypeId, checkIn, checkOut, 1);
+
+        // Then
+        assertFalse(result);
     }
 
     @Test
     void reserveInventory_OptimisticLockingFailure() {
         // Given
-        when(inventoryRepository.findByRoomTypeIdAndDate(roomTypeId, checkIn))
-                .thenReturn(Optional.of(inventory1));
-        when(inventoryRepository.findByRoomTypeIdAndDate(roomTypeId, checkIn.plusDays(1)))
-                .thenReturn(Optional.of(inventory2));
+        when(inventoryRepository.findByRoomTypeIdAndDateRangeForUpdate(roomTypeId, checkIn, checkOut.minusDays(1)))
+                .thenReturn(List.of(inventory1, inventory2));
         when(inventoryRepository.save(any(RoomInventory.class)))
                 .thenThrow(new OptimisticLockingFailureException("Version mismatch"));
 
@@ -119,18 +128,18 @@ class InventoryServiceTest {
     @Test
     void releaseInventory_Success() {
         // Given
-        when(inventoryRepository.findByRoomTypeIdAndDate(roomTypeId, checkIn))
-                .thenReturn(Optional.of(inventory1));
-        when(inventoryRepository.findByRoomTypeIdAndDate(roomTypeId, checkIn.plusDays(1)))
-                .thenReturn(Optional.of(inventory2));
-        when(inventoryRepository.save(any(RoomInventory.class)))
+        when(inventoryRepository.findByRoomTypeIdAndDateBetween(roomTypeId, checkIn, checkOut.minusDays(1)))
+                .thenReturn(List.of(inventory1, inventory2));
+        when(inventoryRepository.saveAll(anyList()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
+        when(cacheManager.getCache("room-availability")).thenReturn(availabilityCache);
 
         // When
         inventoryService.releaseInventory(roomTypeId, checkIn, checkOut, 2);
 
         // Then
-        verify(inventoryRepository, times(2)).save(any(RoomInventory.class));
+        verify(inventoryRepository).saveAll(anyList());
+        verify(availabilityCache).clear();
         assertEquals(7, inventory1.getAvailableRooms());
         assertEquals(7, inventory2.getAvailableRooms());
     }
@@ -138,9 +147,9 @@ class InventoryServiceTest {
     @Test
     void releaseInventory_OptimisticLockingFailure() {
         // Given
-        when(inventoryRepository.findByRoomTypeIdAndDate(roomTypeId, checkIn))
-                .thenReturn(Optional.of(inventory1));
-        when(inventoryRepository.save(any(RoomInventory.class)))
+        when(inventoryRepository.findByRoomTypeIdAndDateBetween(roomTypeId, checkIn, checkOut.minusDays(1)))
+                .thenReturn(List.of(inventory1, inventory2));
+        when(inventoryRepository.saveAll(anyList()))
                 .thenThrow(new OptimisticLockingFailureException("Version mismatch"));
 
         // When & Then
@@ -190,28 +199,50 @@ class InventoryServiceTest {
     @Test
     void initializeInventory_Success() {
         // Given
-        when(inventoryRepository.findByRoomTypeIdAndDate(any(), any()))
-                .thenReturn(Optional.empty());
-        when(inventoryRepository.save(any(RoomInventory.class)))
+        when(inventoryRepository.findByRoomTypeIdAndDateBetween(any(), any(), any()))
+                .thenReturn(List.of());
+        when(inventoryRepository.saveAll(anyList()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
         // When
         inventoryService.initializeInventory(roomTypeId, 10, 7);
 
         // Then
-        verify(inventoryRepository, times(8)).save(any(RoomInventory.class)); // 7 days + today
+        verify(inventoryRepository).saveAll(argThat(inventories -> {
+            int count = 0;
+            for (RoomInventory ignored : inventories) {
+                count++;
+            }
+            return count == 8; // 7 days + today
+        }));
     }
 
     @Test
     void initializeInventory_SkipExisting() {
         // Given
-        when(inventoryRepository.findByRoomTypeIdAndDate(any(), any()))
-                .thenReturn(Optional.of(inventory1));
+        LocalDate today = LocalDate.now();
+        RoomInventory todayInventory = RoomInventory.builder()
+                .roomTypeId(roomTypeId)
+                .date(today)
+                .availableRooms(10)
+                .build();
+        RoomInventory tomorrowInventory = RoomInventory.builder()
+                .roomTypeId(roomTypeId)
+                .date(today.plusDays(1))
+                .availableRooms(10)
+                .build();
+        RoomInventory dayAfterInventory = RoomInventory.builder()
+                .roomTypeId(roomTypeId)
+                .date(today.plusDays(2))
+                .availableRooms(10)
+                .build();
+        when(inventoryRepository.findByRoomTypeIdAndDateBetween(any(), any(), any()))
+                .thenReturn(List.of(todayInventory, tomorrowInventory, dayAfterInventory));
 
         // When
         inventoryService.initializeInventory(roomTypeId, 10, 2);
 
         // Then
-        verify(inventoryRepository, never()).save(any());
+        verify(inventoryRepository, never()).saveAll(anyList());
     }
 }

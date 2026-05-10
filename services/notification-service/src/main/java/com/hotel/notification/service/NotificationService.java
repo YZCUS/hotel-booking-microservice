@@ -7,11 +7,14 @@ import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import com.hotel.notification.exception.ServiceCommunicationException;
 
+import java.security.MessageDigest;
 import java.time.LocalDateTime;
+import java.util.Base64;
 import java.util.UUID;
 
 @Service
@@ -21,6 +24,24 @@ public class NotificationService {
     
     private final EmailService emailService;
     private final WebClient.Builder webClientBuilder;
+
+    @Value("${services.user-service.url:http://user-service:8081}")
+    private String userServiceUrl;
+
+    @Value("${services.hotel-service.url:http://hotel-service:8082}")
+    private String hotelServiceUrl;
+
+    @Value("${app.internal.service-name:notification-service}")
+    private String serviceName;
+
+    @Value("${app.internal.service-secret:secure-shared-secret-change-in-production}")
+    private String serviceSecret;
+
+    @Value("${app.internal.service-header:X-Internal-Service}")
+    private String serviceHeader;
+
+    @Value("${app.internal.token-header:X-Internal-Token}")
+    private String tokenHeader;
     
     public void sendBookingConfirmation(BookingCreatedEvent event) {
         try {
@@ -94,8 +115,9 @@ public class NotificationService {
             WebClient webClient = webClientBuilder.build();
             
             UserInfo userInfo = webClient.get()
-                .uri("http://user-service:8081/api/v1/users/{userId}", userId)
-                .header("X-Internal-Service", "notification-service")
+                .uri(userServiceUrl + "/api/v1/users/{userId}", userId)
+                .header(serviceHeader, serviceName)
+                .header(tokenHeader, generateInternalToken())
                 .retrieve()
                 .bodyToMono(UserInfo.class)
                 .block();
@@ -120,7 +142,7 @@ public class NotificationService {
             
             // Get room type info which includes hotel details
             HotelInfo hotelInfo = webClient.get()
-                .uri("http://hotel-service:8082/api/v1/hotels/rooms/{roomTypeId}/hotel-details", roomTypeId)
+                .uri(hotelServiceUrl + "/api/v1/hotels/rooms/{roomTypeId}/hotel-details", roomTypeId)
                 .retrieve()
                 .bodyToMono(HotelInfo.class)
                 .block();
@@ -136,6 +158,18 @@ public class NotificationService {
             log.error("Failed to get hotel info for room type: {}", roomTypeId, e);
             // Don't send email with default data - throw exception instead
             throw new ServiceCommunicationException("Cannot fetch hotel details for notification");
+        }
+    }
+
+    private String generateInternalToken() {
+        try {
+            long currentTimeMinutes = System.currentTimeMillis() / (1000 * 60);
+            String data = serviceName + ":" + serviceSecret + ":" + currentTimeMinutes;
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(data.getBytes());
+            return Base64.getEncoder().encodeToString(hash).substring(0, 32);
+        } catch (Exception e) {
+            throw new ServiceCommunicationException("Cannot generate internal service token");
         }
     }
     

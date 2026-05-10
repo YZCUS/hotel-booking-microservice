@@ -4,8 +4,10 @@ import com.hotel.hotel.dto.HotelRequest;
 import com.hotel.hotel.dto.HotelResponse;
 import com.hotel.hotel.dto.SearchCriteria;
 import com.hotel.hotel.entity.Hotel;
+import com.hotel.hotel.event.EventPublisher;
 import com.hotel.hotel.exception.HotelNotFoundException;
 import com.hotel.hotel.repository.HotelRepository;
+import com.hotel.hotel.repository.RoomTypeRepository;
 import com.hotel.hotel.repository.UserFavoriteRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -51,6 +53,15 @@ class HotelServiceTest {
     
     @Mock
     private ValueOperations<String, Object> valueOperations;
+
+    @Mock
+    private RoomService roomService;
+
+    @Mock
+    private RoomTypeRepository roomTypeRepository;
+
+    @Mock
+    private EventPublisher eventPublisher;
     
     @InjectMocks
     private HotelService hotelService;
@@ -79,6 +90,7 @@ class HotelServiceTest {
                 .build();
         
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(roomService.getRoomAvailabilities(any())).thenReturn(java.util.Map.of());
     }
     
     @Test
@@ -161,25 +173,20 @@ class HotelServiceTest {
         assertEquals("Test City", result.getContent().get(0).getCity());
         
         verify(hotelRepository).findAll(any(Specification.class), any(Pageable.class));
-        verify(valueOperations).set(anyString(), any(), any(Long.class), any(TimeUnit.class));
+        verify(valueOperations, never()).set(anyString(), any(), any(Long.class), any(TimeUnit.class));
     }
     
     @Test
-    void testSearchHotels_FromCache() {
+    void testSearchHotels_DoesNotUseRedisPageCache() {
         // Given
         SearchCriteria criteria = SearchCriteria.builder()
                 .city("Test City")
                 .build();
         Pageable pageable = PageRequest.of(0, 20);
-        
-        HotelResponse cachedHotel = HotelResponse.builder()
-                .id(testHotelId)
-                .name("Cached Hotel")
-                .city("Test City")
-                .build();
-        Page<HotelResponse> cachedPage = new PageImpl<>(Arrays.asList(cachedHotel));
-        
-        when(valueOperations.get(anyString())).thenReturn(cachedPage);
+
+        Page<Hotel> hotelPage = new PageImpl<>(Arrays.asList(testHotel));
+        when(hotelRepository.findAll(any(Specification.class), any(Pageable.class))).thenReturn(hotelPage);
+        when(favoriteRepository.countFavoritesByHotelId(testHotelId)).thenReturn(2L);
         
         // When
         Page<HotelResponse> result = hotelService.searchHotels(criteria, pageable);
@@ -187,9 +194,10 @@ class HotelServiceTest {
         // Then
         assertNotNull(result);
         assertEquals(1, result.getContent().size());
-        assertEquals("Cached Hotel", result.getContent().get(0).getName());
+        assertEquals("Test Hotel", result.getContent().get(0).getName());
         
-        verify(hotelRepository, never()).findAll(any(Specification.class), any(Pageable.class));
+        verify(valueOperations, never()).get(anyString());
+        verify(hotelRepository).findAll(any(Specification.class), any(Pageable.class));
     }
     
     @Test
@@ -230,6 +238,7 @@ class HotelServiceTest {
         
         verify(hotelRepository).save(any(Hotel.class));
         verify(favoriteRepository).countFavoritesByHotelId(any(UUID.class));
+        verify(eventPublisher).publishHotelCreated(any());
     }
     
     @Test
@@ -260,6 +269,7 @@ class HotelServiceTest {
         verify(hotelRepository).findById(testHotelId);
         verify(hotelRepository).save(testHotel);
         verify(favoriteRepository).countFavoritesByHotelId(testHotelId);
+        verify(eventPublisher).publishHotelUpdated(any());
     }
     
     @Test
@@ -291,6 +301,7 @@ class HotelServiceTest {
         // Then
         verify(hotelRepository).findById(testHotelId);
         verify(hotelRepository).delete(testHotel);
+        verify(eventPublisher).publishHotelDeleted(any());
     }
     
     @Test

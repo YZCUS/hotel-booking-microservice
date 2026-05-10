@@ -168,7 +168,7 @@ public class RoomService {
                 .pricePerNight(roomType.getPricePerNight())
                 .totalInventory(roomType.getTotalInventory())
                 .createdAt(roomType.getCreatedAt())
-                .availableRooms(availableRooms) // 使用傳入的庫存
+                .availableRooms(availableRooms)
                 .isAvailable(availableRooms != null && availableRooms > 0)
                 .build();
     }

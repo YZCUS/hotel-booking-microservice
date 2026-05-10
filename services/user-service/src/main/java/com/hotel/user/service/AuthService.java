@@ -4,6 +4,8 @@ import com.hotel.user.dto.JwtResponse;
 import com.hotel.user.dto.LoginRequest;
 import com.hotel.user.dto.RegisterRequest;
 import com.hotel.user.entity.User;
+import com.hotel.user.event.EventPublisher;
+import com.hotel.user.event.UserRegisteredEvent;
 import com.hotel.user.exception.EmailAlreadyExistsException;
 import com.hotel.user.repository.UserRepository;
 import com.hotel.user.util.JwtUtil;
@@ -14,6 +16,8 @@ import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Service
 @RequiredArgsConstructor
@@ -24,6 +28,7 @@ public class AuthService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
+    private final EventPublisher eventPublisher;
     
     public JwtResponse register(RegisterRequest request) {
         log.info("Registering new user with email: {}", request.getEmail());
@@ -46,6 +51,14 @@ public class AuthService {
         
         // Generate JWT token
         String token = jwtUtil.generateToken(saved.getEmail(), saved.getId());
+
+        UserRegisteredEvent event = UserRegisteredEvent.builder()
+                .userId(saved.getId())
+                .email(saved.getEmail())
+                .fullName(saved.getFullName())
+                .registeredAt(saved.getCreatedAt() != null ? saved.getCreatedAt() : java.time.LocalDateTime.now())
+                .build();
+        publishAfterCommit(() -> eventPublisher.publishUserRegistered(event));
         
         log.info("User registered successfully: {}", saved.getEmail());
         
@@ -93,5 +106,23 @@ public class AuthService {
     
     public String extractEmailFromToken(String token) {
         return jwtUtil.extractEmail(token);
+    }
+
+    private void publishAfterCommit(Runnable publisher) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            publisher.run();
+            return;
+        }
+
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    publisher.run();
+                } catch (Exception e) {
+                    log.error("Failed to publish user event after commit", e);
+                }
+            }
+        });
     }
 }

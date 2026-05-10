@@ -102,13 +102,20 @@ services:
       SPRING_REDIS_HOST: redis
       SPRING_REDIS_PORT: 6379
       SPRING_REDIS_PASSWORD: hotel_redis_pass
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+      SPRING_RABBITMQ_USERNAME: hotel_user
+      SPRING_RABBITMQ_PASSWORD: hotel_pass
       JWT_SECRET: ${JWT_SECRET:-myVerySecureSecretKey123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz}
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:-secure-shared-secret-change-in-production}
       SPRING_JPA_HIBERNATE_DDL_AUTO: validate
       SPRING_JPA_PROPERTIES_HIBERNATE_DEFAULT_SCHEMA: user_svc
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     networks:
       - hotel-network
@@ -136,12 +143,19 @@ services:
       SPRING_REDIS_HOST: redis
       SPRING_REDIS_PORT: 6379
       SPRING_REDIS_PASSWORD: hotel_redis_pass
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+      SPRING_RABBITMQ_USERNAME: hotel_user
+      SPRING_RABBITMQ_PASSWORD: hotel_pass
+      BOOKING_SERVICE_URL: http://booking-service:8083
       SPRING_JPA_HIBERNATE_DDL_AUTO: validate
       SPRING_JPA_PROPERTIES_HIBERNATE_DEFAULT_SCHEMA: hotel_svc
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     networks:
       - hotel-network
@@ -173,6 +187,7 @@ services:
       SPRING_RABBITMQ_PORT: 5672
       SPRING_RABBITMQ_USERNAME: hotel_user
       SPRING_RABBITMQ_PASSWORD: hotel_pass
+      HOTEL_SERVICE_URL: http://hotel-service:8082
       SPRING_JPA_HIBERNATE_DDL_AUTO: validate
       SPRING_JPA_PROPERTIES_HIBERNATE_DEFAULT_SCHEMA: booking_svc
     depends_on:
@@ -204,6 +219,7 @@ services:
       SPRING_PROFILES_ACTIVE: docker
       MEILISEARCH_HOST: http://meilisearch:7700
       MEILISEARCH_API_KEY: masterKey123456789
+      HOTEL_SERVICE_URL: http://hotel-service:8082
       SPRING_RABBITMQ_HOST: rabbitmq
       SPRING_RABBITMQ_PORT: 5672
       SPRING_RABBITMQ_USERNAME: hotel_user
@@ -242,6 +258,9 @@ services:
       SPRING_MAIL_USERNAME: ${MAIL_USERNAME:-your-email@gmail.com}
       SPRING_MAIL_PASSWORD: ${MAIL_PASSWORD:-your-app-password}
       SPRING_MAIL_FROM: ${MAIL_FROM:-noreply@hotel.com}
+      USER_SERVICE_URL: http://user-service:8081
+      HOTEL_SERVICE_URL: http://hotel-service:8082
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:-secure-shared-secret-change-in-production}
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -297,6 +316,25 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
+
+  # Demo Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: http://localhost:8080/api/v1
+    container_name: hotel-frontend
+    ports:
+      - "3000:80"
+    environment:
+      VITE_API_BASE_URL: http://localhost:8080/api/v1
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    networks:
+      - hotel-network
+    restart: unless-stopped
 
   # Monitoring & Management
   prometheus:

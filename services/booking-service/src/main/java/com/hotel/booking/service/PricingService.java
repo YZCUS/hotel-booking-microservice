@@ -8,10 +8,10 @@ import io.github.resilience4j.timelimiter.annotation.TimeLimiter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.reactive.function.client.WebClientException;
 import reactor.core.publisher.Mono;
 
 import java.math.BigDecimal;
@@ -19,7 +19,6 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 
 @Service
 @RequiredArgsConstructor
@@ -27,6 +26,9 @@ import java.util.concurrent.CompletableFuture;
 public class PricingService {
     
     private final WebClient.Builder webClientBuilder;
+
+    @Value("${services.hotel-service.url:http://hotel-service:8082}")
+    private String hotelServiceUrl;
     
     public BigDecimal calculateTotalPrice(UUID roomTypeId, LocalDate checkIn, LocalDate checkOut) {
         log.info("Calculating total price for roomType {} from {} to {}", roomTypeId, checkIn, checkOut);
@@ -84,7 +86,7 @@ public class PricingService {
         log.debug("Fetching room type price for: {}", roomTypeId);
         
         WebClient webClient = webClientBuilder
-            .baseUrl("http://hotel-service:8082")
+            .baseUrl(hotelServiceUrl)
             .build();
         
         return webClient.get()
@@ -124,7 +126,7 @@ public class PricingService {
     private BigDecimal getRoomTypePrice(UUID roomTypeId) {
         try {
             WebClient webClient = webClientBuilder
-                .baseUrl("http://hotel-service:8082")
+                .baseUrl(hotelServiceUrl)
                 .build();
             
             log.debug("Calling hotel service for room type price (sync - deprecated): {}", roomTypeId);

@@ -50,6 +50,16 @@ app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:3001,http://localhost:8080}
 
+services:
+  user-service:
+    url: ${USER_SERVICE_URL:http://user-service:8081}
+  hotel-service:
+    url: ${HOTEL_SERVICE_URL:http://hotel-service:8082}
+  booking-service:
+    url: ${BOOKING_SERVICE_URL:http://booking-service:8083}
+  search-service:
+    url: ${SEARCH_SERVICE_URL:http://search-service:8084}
+
 # Circuit Breaker Configuration
 resilience4j:
   circuitbreaker:

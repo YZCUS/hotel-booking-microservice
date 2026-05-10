@@ -69,3 +69,16 @@ notification:
     core-pool-size: 5
     max-pool-size: 10
     queue-capacity: 100
+
+services:
+  user-service:
+    url: ${USER_SERVICE_URL:http://user-service:8081}
+  hotel-service:
+    url: ${HOTEL_SERVICE_URL:http://hotel-service:8082}
+
+app:
+  internal:
+    service-name: notification-service
+    service-secret: ${INTERNAL_SERVICE_SECRET:secure-shared-secret-change-in-production}
+    service-header: X-Internal-Service
+    token-header: X-Internal-Token

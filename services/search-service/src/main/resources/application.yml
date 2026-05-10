@@ -24,6 +24,10 @@ meilisearch:
   host: ${MEILISEARCH_HOST:http://localhost:7700}
   api-key: ${MEILISEARCH_API_KEY}
 
+services:
+  hotel-service:
+    url: ${HOTEL_SERVICE_URL:http://hotel-service:8082}
+
 management:
   endpoints:
     web:

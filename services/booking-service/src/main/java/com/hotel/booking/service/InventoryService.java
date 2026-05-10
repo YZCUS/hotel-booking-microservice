@@ -5,7 +5,6 @@ import com.hotel.booking.exception.InventoryNotFoundException;
 import com.hotel.booking.repository.RoomInventoryRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
@@ -79,7 +78,7 @@ public class InventoryService {
             
             log.info("Successfully reserved {} rooms for roomType {} from {} to {}", 
                 rooms, roomTypeId, checkIn, checkOut);
-            evictAvailabilityKeys(roomTypeId, checkIn, checkOut);
+            clearAvailabilityCache();
             return true;
             
         } catch (OptimisticLockingFailureException e) {
@@ -123,7 +122,7 @@ public class InventoryService {
             
             log.info("Successfully released {} rooms for roomType {} from {} to {}", 
                 rooms, roomTypeId, checkIn, checkOut);
-            evictAvailabilityKeys(roomTypeId, checkIn, checkOut);
+            clearAvailabilityCache();
                 
         } catch (OptimisticLockingFailureException e) {
             log.error("Optimistic lock failure when releasing inventory for roomType: {}", roomTypeId);
@@ -218,17 +217,12 @@ public class InventoryService {
         return dates;
     }
 
-    private void evictAvailabilityKeys(UUID roomTypeId, LocalDate checkIn, LocalDate checkOut) {
+    private void clearAvailabilityCache() {
         Cache cache = cacheManager.getCache("room-availability");
         if (cache == null) {
             return;
         }
 
-        // Keys follow: roomTypeId_checkIn_checkOut_rooms
-        // Evict common request sizes to avoid global eviction churn.
-        for (int rooms = 1; rooms <= 4; rooms++) {
-            String key = roomTypeId + "_" + checkIn + "_" + checkOut + "_" + rooms;
-            cache.evict(key);
-        }
+        cache.clear();
     }
 }

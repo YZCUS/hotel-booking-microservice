@@ -106,6 +106,10 @@ booking:
     advance-booking-discount: 0.10
     advance-booking-days: 30
 
+services:
+  hotel-service:
+    url: ${HOTEL_SERVICE_URL:http://hotel-service:8082}
+
 # Circuit Breaker Configuration
 resilience4j:
   circuitbreaker:

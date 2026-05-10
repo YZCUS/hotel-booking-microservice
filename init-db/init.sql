@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS hotel_svc.hotels (
     longitude DECIMAL(11, 8),
     star_rating INTEGER CHECK (star_rating >= 1 AND star_rating <= 5),
     amenities JSONB,
+    version BIGINT DEFAULT 0 NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -43,6 +44,7 @@ CREATE TABLE IF NOT EXISTS hotel_svc.room_types (
     capacity INTEGER NOT NULL,
     price_per_night DECIMAL(10, 2) NOT NULL,
     total_inventory INTEGER NOT NULL,
+    version BIGINT DEFAULT 0 NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -52,6 +54,7 @@ CREATE TABLE IF NOT EXISTS booking_svc.room_inventory (
     room_type_id UUID NOT NULL, -- Removed FK constraint - validate in application
     date DATE NOT NULL,
     available_rooms INTEGER NOT NULL,
+    version INTEGER DEFAULT 0 NOT NULL,
     UNIQUE(room_type_id, date)
 );
 
@@ -66,7 +69,7 @@ CREATE TABLE IF NOT EXISTS booking_svc.bookings (
     total_price DECIMAL(10, 2) NOT NULL,
     status VARCHAR(50) NOT NULL DEFAULT 'PENDING',
     room_number VARCHAR(20),
-    version INTEGER DEFAULT 0,
+    version INTEGER DEFAULT 0 NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -88,6 +91,12 @@ CREATE TABLE IF NOT EXISTS search_svc.search_history (
     results_count INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Schema drift safety for existing local volumes
+ALTER TABLE hotel_svc.hotels ADD COLUMN IF NOT EXISTS version BIGINT DEFAULT 0 NOT NULL;
+ALTER TABLE hotel_svc.room_types ADD COLUMN IF NOT EXISTS version BIGINT DEFAULT 0 NOT NULL;
+ALTER TABLE booking_svc.room_inventory ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 0 NOT NULL;
+ALTER TABLE booking_svc.bookings ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 0 NOT NULL;
 
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_users_email ON user_svc.users(email);

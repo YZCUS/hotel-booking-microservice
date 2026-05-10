@@ -9,7 +9,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.test.context.TestPropertySource;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.UUID;
@@ -20,8 +19,11 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest
 @TestPropertySource(properties = {
-    "spring.datasource.url=jdbc:h2:mem:testdb",
-    "spring.jpa.hibernate.ddl-auto=create-drop"
+    "spring.datasource.url=jdbc:h2:mem:testdb;INIT=CREATE SCHEMA IF NOT EXISTS booking_svc;DB_CLOSE_DELAY=-1",
+    "spring.datasource.driver-class-name=org.h2.Driver",
+    "spring.jpa.hibernate.ddl-auto=create-drop",
+    "spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.H2Dialect",
+    "spring.cache.type=simple"
 })
 class OptimisticLockingIntegrationTest {
 
@@ -49,7 +51,6 @@ class OptimisticLockingIntegrationTest {
     }
 
     @Test
-    @Transactional
     void testOptimisticLocking_ConcurrentReservation() throws ExecutionException, InterruptedException {
         // Given - Two concurrent reservation attempts
         CompletableFuture<Boolean> reservation1 = CompletableFuture.supplyAsync(() -> {
@@ -85,7 +86,6 @@ class OptimisticLockingIntegrationTest {
     }
 
     @Test
-    @Transactional
     void testOptimisticLocking_ReservationExceedsAvailability() throws ExecutionException, InterruptedException {
         // Given - Two concurrent reservations that exceed available inventory
         CompletableFuture<Boolean> reservation1 = CompletableFuture.supplyAsync(() -> {
@@ -118,7 +118,6 @@ class OptimisticLockingIntegrationTest {
     }
 
     @Test
-    @Transactional
     void testOptimisticLocking_ReservationAndRelease() throws ExecutionException, InterruptedException {
         // Given - First reserve some inventory
         boolean reserved = inventoryService.reserveInventory(roomTypeId, testDate, testDate.plusDays(1), 5);

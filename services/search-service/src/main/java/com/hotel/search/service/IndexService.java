@@ -9,6 +9,7 @@ import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -27,6 +28,9 @@ public class IndexService {
     
     @Autowired(required = false)
     private WebClient.Builder webClientBuilder;
+
+    @Value("${services.hotel-service.url:http://hotel-service:8082}")
+    private String hotelServiceUrl;
     
     public static final String HOTEL_INDEX = "hotels";
     private static final int BATCH_SIZE = 100;
@@ -296,7 +300,7 @@ public class IndexService {
             
             // Fetch hotels from hotel service
             List<HotelDocument> hotels = webClient.get()
-                .uri("http://hotel-service:8082/api/v1/hotels/export")
+                .uri(hotelServiceUrl + "/api/v1/hotels/export")
                 .retrieve()
                 .bodyToFlux(HotelDocument.class)
                 .collectList()

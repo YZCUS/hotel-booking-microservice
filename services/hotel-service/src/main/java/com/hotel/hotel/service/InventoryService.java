@@ -2,6 +2,7 @@ package com.hotel.hotel.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Service;
@@ -21,6 +22,9 @@ import java.util.UUID;
 public class InventoryService {
     
     private final WebClient.Builder webClientBuilder;
+
+    @Value("${services.booking-service.url:http://booking-service:8083}")
+    private String bookingServiceUrl;
     
     @Cacheable(value = "room-availability", 
                key = "#roomTypeId + '_' + #date",
@@ -37,15 +41,12 @@ public class InventoryService {
             return 0; // Safe fallback
         }
     }
-    
-    /**
-     * Async version for better performance - non-blocking
-     */
+
     public Mono<Integer> getAvailableRoomsAsync(UUID roomTypeId, LocalDate date) {
         log.debug("Checking room availability async for roomType {} on date {}", roomTypeId, date);
         
         WebClient webClient = webClientBuilder
-            .baseUrl("http://booking-service:8083")
+            .baseUrl(bookingServiceUrl)
             .build();
         
         return webClient.get()
@@ -66,7 +67,7 @@ public class InventoryService {
         }
 
         log.debug("Fetching batch room availability for {} room types", roomTypeIds.size());
-        WebClient webClient = webClientBuilder.baseUrl("http://booking-service:8083").build();
+        WebClient webClient = webClientBuilder.baseUrl(bookingServiceUrl).build();
 
         return webClient.post()
                 .uri("/api/v1/inventory/availabilities-for-today")

@@ -1,5 +1,8 @@
 *.md
 !README.md
+!AGENTS.md
+!docs/
+!docs/**/*.md
 
 # Gradle
 .gradle/
@@ -28,6 +31,14 @@ Thumbs.db
 
 # Local assistant artifacts
 .claude/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+frontend/**/*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
 # OS / Editor
 .DS_Store
 Thumbs.db
@@ -84,4 +95,3 @@ dump.rdb
 pgdata/
 postgresql.conf
 pg_hba.conf
-

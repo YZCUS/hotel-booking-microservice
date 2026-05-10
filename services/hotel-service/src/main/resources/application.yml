@@ -36,6 +36,14 @@ spring:
     redis:
       time-to-live: 600000 # 10 minutes
 
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:}
+    virtual-host: /
+    connection-timeout: 30000
+
 management:
   endpoints:
     web:
@@ -62,3 +70,7 @@ app:
     allowed-headers: Content-Type,Authorization,X-User-Id
     allow-credentials: true
     max-age: 3600
+
+services:
+  booking-service:
+    url: ${BOOKING_SERVICE_URL:http://booking-service:8083}
