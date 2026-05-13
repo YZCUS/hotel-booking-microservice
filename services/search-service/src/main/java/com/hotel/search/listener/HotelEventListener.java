@@ -29,6 +29,7 @@ public class HotelEventListener {
             log.info("Successfully indexed new hotel: {}", event.getHotelId());
         } catch (Exception e) {
             log.error("Failed to index new hotel: {}", event.getHotelId(), e);
+            throw e;
         }
     }
     
@@ -42,6 +43,7 @@ public class HotelEventListener {
             log.info("Successfully updated hotel index: {}", event.getHotelId());
         } catch (Exception e) {
             log.error("Failed to update hotel index: {}", event.getHotelId(), e);
+            throw e;
         }
     }
     
@@ -54,6 +56,7 @@ public class HotelEventListener {
             log.info("Successfully removed hotel from index: {}", event.getHotelId());
         } catch (Exception e) {
             log.error("Failed to remove hotel from index: {}", event.getHotelId(), e);
+            throw e;
         }
     }
     

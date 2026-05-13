@@ -12,11 +12,15 @@ import com.hotel.booking.repository.BookingRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionOperations;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -44,6 +48,9 @@ class BookingServiceTest {
 
     @Mock
     private ApplicationEventPublisher applicationEventPublisher;
+
+    @Mock
+    private TransactionOperations bookingTransactionOperations;
 
     @InjectMocks
     private BookingService bookingService;
@@ -79,6 +86,11 @@ class BookingServiceTest {
                 .status(BookingStatus.CONFIRMED)
                 .version(0)
                 .build();
+
+        lenient().when(bookingTransactionOperations.execute(any())).thenAnswer(invocation -> {
+            TransactionCallback<?> callback = invocation.getArgument(0);
+            return callback.doInTransaction(mock(TransactionStatus.class));
+        });
     }
 
     @Test
@@ -103,12 +115,30 @@ class BookingServiceTest {
         verify(pricingService).calculateTotalPrice(roomTypeId, bookingRequest.getCheckInDate(), 
                 bookingRequest.getCheckOutDate());
         verify(bookingRepository).save(any(Booking.class));
-        verify(eventPublisher).publishBookingCreated(any());
+        verify(applicationEventPublisher).publishEvent(booking);
+        verify(eventPublisher, never()).publishBookingCreated(any());
+    }
+
+    @Test
+    void createBooking_CalculatesPriceBeforeReservingInventory() {
+        when(pricingService.calculateTotalPrice(any(), any(), any())).thenReturn(BigDecimal.valueOf(200));
+        when(inventoryService.reserveInventory(any(), any(), any(), eq(1))).thenReturn(true);
+        when(bookingRepository.save(any(Booking.class))).thenReturn(booking);
+
+        bookingService.createBooking(bookingRequest);
+
+        InOrder inOrder = inOrder(pricingService, inventoryService, bookingRepository);
+        inOrder.verify(pricingService).calculateTotalPrice(
+                roomTypeId, bookingRequest.getCheckInDate(), bookingRequest.getCheckOutDate());
+        inOrder.verify(inventoryService).reserveInventory(
+                roomTypeId, bookingRequest.getCheckInDate(), bookingRequest.getCheckOutDate(), 1);
+        inOrder.verify(bookingRepository).save(any(Booking.class));
     }
 
     @Test
     void createBooking_InsufficientInventory() {
         // Given
+        when(pricingService.calculateTotalPrice(any(), any(), any())).thenReturn(BigDecimal.valueOf(200));
         when(inventoryService.reserveInventory(any(), any(), any(), eq(1))).thenReturn(false);
 
         // When & Then
@@ -117,8 +147,10 @@ class BookingServiceTest {
         
         verify(inventoryService).reserveInventory(roomTypeId, bookingRequest.getCheckInDate(), 
                 bookingRequest.getCheckOutDate(), 1);
-        verify(pricingService, never()).calculateTotalPrice(any(), any(), any());
+        verify(pricingService).calculateTotalPrice(roomTypeId, bookingRequest.getCheckInDate(),
+                bookingRequest.getCheckOutDate());
         verify(bookingRepository, never()).save(any());
+        verify(applicationEventPublisher, never()).publishEvent(any());
         verify(eventPublisher, never()).publishBookingCreated(any());
     }
 
@@ -181,7 +213,7 @@ class BookingServiceTest {
     void cancelBooking_Success() {
         // Given
         booking.setCheckInDate(LocalDate.now().plusDays(2)); // More than 24 hours ahead
-        when(bookingRepository.findByIdAndUserId(bookingId, userId)).thenReturn(Optional.of(booking));
+        when(bookingRepository.findByIdAndUserIdForUpdate(bookingId, userId)).thenReturn(Optional.of(booking));
         when(bookingRepository.save(any(Booking.class))).thenReturn(booking);
 
         // When
@@ -189,17 +221,18 @@ class BookingServiceTest {
 
         // Then
         assertNotNull(response);
-        verify(bookingRepository).findByIdAndUserId(bookingId, userId);
+        verify(bookingRepository).findByIdAndUserIdForUpdate(bookingId, userId);
         verify(inventoryService).releaseInventory(roomTypeId, booking.getCheckInDate(), 
                 booking.getCheckOutDate(), 1);
-        verify(eventPublisher).publishBookingCancelled(any());
+        verify(applicationEventPublisher).publishEvent(booking);
+        verify(eventPublisher, never()).publishBookingCancelled(any());
     }
 
     @Test
     void cancelBooking_TooLateToCancel() {
         // Given
         booking.setCheckInDate(LocalDate.now()); // Same day - within 24 hours
-        when(bookingRepository.findByIdAndUserId(bookingId, userId)).thenReturn(Optional.of(booking));
+        when(bookingRepository.findByIdAndUserIdForUpdate(bookingId, userId)).thenReturn(Optional.of(booking));
 
         // When & Then
         assertThrows(BookingConflictException.class, 
@@ -210,7 +243,7 @@ class BookingServiceTest {
     void cancelBooking_AlreadyCancelled_Idempotent() {
         // Given
         booking.setStatus(BookingStatus.CANCELLED);
-        when(bookingRepository.findByIdAndUserId(bookingId, userId)).thenReturn(Optional.of(booking));
+        when(bookingRepository.findByIdAndUserIdForUpdate(bookingId, userId)).thenReturn(Optional.of(booking));
 
         // When & Then
         BookingResponse response = bookingService.cancelBooking(bookingId, userId);
@@ -223,7 +256,7 @@ class BookingServiceTest {
     void cancelBooking_OptimisticLockingFailure() {
         // Given
         booking.setCheckInDate(LocalDate.now().plusDays(2));
-        when(bookingRepository.findByIdAndUserId(bookingId, userId)).thenReturn(Optional.of(booking));
+        when(bookingRepository.findByIdAndUserIdForUpdate(bookingId, userId)).thenReturn(Optional.of(booking));
         when(bookingRepository.save(any(Booking.class)))
                 .thenThrow(new OptimisticLockingFailureException("Version mismatch"));
 
@@ -245,5 +278,41 @@ class BookingServiceTest {
         // Verify inventory is released on failure
         verify(inventoryService).releaseInventory(roomTypeId, bookingRequest.getCheckInDate(), 
                 bookingRequest.getCheckOutDate(), 1);
+    }
+
+    @Test
+    void handleBookingCreated_PublishesCreatedEvent() {
+        // When
+        bookingService.handleBookingCreated(booking);
+
+        // Then
+        verify(eventPublisher).publishBookingCreated(argThat(event ->
+                bookingId.equals(event.getBookingId())
+                        && userId.equals(event.getUserId())
+                        && roomTypeId.equals(event.getRoomTypeId())));
+    }
+
+    @Test
+    void handleBookingCancelled_PublishesCancelledEventForCancelledBooking() {
+        // Given
+        booking.setStatus(BookingStatus.CANCELLED);
+
+        // When
+        bookingService.handleBookingCancelled(booking);
+
+        // Then
+        verify(eventPublisher).publishBookingCancelled(argThat(event ->
+                bookingId.equals(event.getBookingId())
+                        && userId.equals(event.getUserId())
+                        && roomTypeId.equals(event.getRoomTypeId())));
+    }
+
+    @Test
+    void handleBookingCancelled_IgnoresNonCancelledBooking() {
+        // When
+        bookingService.handleBookingCancelled(booking);
+
+        // Then
+        verify(eventPublisher, never()).publishBookingCancelled(any());
     }
 }

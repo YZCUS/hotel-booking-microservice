@@ -3,7 +3,9 @@ package com.hotel.search.service;
 import com.meilisearch.sdk.Client;
 import com.meilisearch.sdk.Index;
 import com.meilisearch.sdk.model.Settings;
+import com.meilisearch.sdk.model.TaskInfo;
 import com.hotel.search.model.HotelDocument;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
@@ -30,6 +32,8 @@ public class IndexService {
     
     public static final String HOTEL_INDEX = "hotels";
     private static final int BATCH_SIZE = 100;
+    private static final TypeReference<Map<String, Object>> HOTEL_MAP_TYPE = new TypeReference<>() {
+    };
     
     @PostConstruct
     public void initializeIndex() {
@@ -51,7 +55,8 @@ public class IndexService {
             
             if (!indexExists) {
                 try {
-                    meilisearchClient.createIndex(HOTEL_INDEX, "id");
+                    TaskInfo createTask = meilisearchClient.createIndex(HOTEL_INDEX, "id");
+                    waitForTask(createTask);
                     index = meilisearchClient.getIndex(HOTEL_INDEX);
                     log.info("Successfully created new index '{}'", HOTEL_INDEX);
                 } catch (Exception e) {
@@ -151,7 +156,8 @@ public class IndexService {
                 log.debug("Advanced typo tolerance configuration skipped for SDK 0.11.1 compatibility");
                 
                 // Apply settings to index
-                index.updateSettings(settings);
+                TaskInfo settingsTask = index.updateSettings(settings);
+                waitForTask(settingsTask);
                 log.info("Index settings updated successfully for '{}'", HOTEL_INDEX);
             } else {
                 log.info("Index '{}' settings are up to date, skipping configuration", HOTEL_INDEX);
@@ -174,17 +180,19 @@ public class IndexService {
             
             // Add geo coordinates if available
             if (hotel.getLatitude() != null && hotel.getLongitude() != null) {
-                Map<String, Object> hotelMap = objectMapper.convertValue(hotel, Map.class);
+                Map<String, Object> hotelMap = objectMapper.convertValue(hotel, HOTEL_MAP_TYPE);
                 hotelMap.put("_geo", Map.of(
                     "lat", hotel.getLatitude(),
                     "lng", hotel.getLongitude()
                 ));
                 
                 String json = objectMapper.writeValueAsString(List.of(hotelMap));
-                index.addDocuments(json);
+                TaskInfo taskInfo = index.addDocuments(json);
+                waitForTask(taskInfo);
             } else {
                 String json = objectMapper.writeValueAsString(List.of(hotel));
-                index.addDocuments(json);
+                TaskInfo taskInfo = index.addDocuments(json);
+                waitForTask(taskInfo);
             }
             
             log.info("Hotel indexed successfully: {}", hotel.getId());
@@ -210,7 +218,7 @@ public class IndexService {
                 // Add geo coordinates to each hotel
                 List<Map<String, Object>> hotelMaps = batch.stream()
                     .map(hotel -> {
-                        Map<String, Object> hotelMap = objectMapper.convertValue(hotel, Map.class);
+                        Map<String, Object> hotelMap = objectMapper.convertValue(hotel, HOTEL_MAP_TYPE);
                         if (hotel.getLatitude() != null && hotel.getLongitude() != null) {
                             hotelMap.put("_geo", Map.of(
                                 "lat", hotel.getLatitude(),
@@ -222,7 +230,8 @@ public class IndexService {
                     .collect(Collectors.toList());
                 
                 String json = objectMapper.writeValueAsString(hotelMaps);
-                index.addDocuments(json);
+                TaskInfo taskInfo = index.addDocuments(json);
+                waitForTask(taskInfo);
                 
                 log.info("Indexed batch of {} hotels", batch.size());
             }
@@ -240,17 +249,19 @@ public class IndexService {
             
             // Add geo coordinates if available
             if (hotel.getLatitude() != null && hotel.getLongitude() != null) {
-                Map<String, Object> hotelMap = objectMapper.convertValue(hotel, Map.class);
+                Map<String, Object> hotelMap = objectMapper.convertValue(hotel, HOTEL_MAP_TYPE);
                 hotelMap.put("_geo", Map.of(
                     "lat", hotel.getLatitude(),
                     "lng", hotel.getLongitude()
                 ));
                 
                 String json = objectMapper.writeValueAsString(List.of(hotelMap));
-                index.updateDocuments(json);
+                TaskInfo taskInfo = index.updateDocuments(json);
+                waitForTask(taskInfo);
             } else {
                 String json = objectMapper.writeValueAsString(List.of(hotel));
-                index.updateDocuments(json);
+                TaskInfo taskInfo = index.updateDocuments(json);
+                waitForTask(taskInfo);
             }
             
             log.info("Hotel updated successfully: {}", hotel.getId());
@@ -263,7 +274,8 @@ public class IndexService {
     public void deleteHotel(String hotelId) {
         try {
             Index index = meilisearchClient.index(HOTEL_INDEX);
-            index.deleteDocument(hotelId);
+            TaskInfo taskInfo = index.deleteDocument(hotelId);
+            waitForTask(taskInfo);
             log.info("Hotel deleted successfully: {}", hotelId);
         } catch (Exception e) {
             log.error("Failed to delete hotel: {}", hotelId, e);
@@ -274,7 +286,8 @@ public class IndexService {
     public void clearIndex() {
         try {
             Index index = meilisearchClient.index(HOTEL_INDEX);
-            index.deleteAllDocuments();
+            TaskInfo taskInfo = index.deleteAllDocuments();
+            waitForTask(taskInfo);
             log.info("Hotel index cleared successfully");
         } catch (Exception e) {
             log.error("Failed to clear hotel index", e);
@@ -408,6 +421,12 @@ public class IndexService {
         } catch (Exception e) {
             log.warn("Failed to check index settings, will update settings", e);
             return true;
+        }
+    }
+
+    private void waitForTask(TaskInfo taskInfo) throws Exception {
+        if (taskInfo != null) {
+            meilisearchClient.waitForTask(taskInfo.getTaskUid());
         }
     }
 }

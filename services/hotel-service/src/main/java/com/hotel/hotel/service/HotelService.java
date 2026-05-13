@@ -41,6 +41,7 @@ public class HotelService {
     
     private static final String HOTEL_CACHE_KEY = "hotel:";
     private static final String SEARCH_CACHE_KEY = "search:";
+    private static final String SEARCH_CACHE_VERSION_KEY = "search:version";
     private static final int CACHE_TTL_MINUTES = 10;
     
     @Cacheable(value = "hotels", key = "#hotelId")
@@ -86,7 +87,7 @@ public class HotelService {
     public Page<HotelResponse> searchHotels(SearchCriteria criteria, Pageable pageable, UUID userId) {
         log.info("Searching hotels with criteria: {}", criteria);
         
-        String cacheKey = SEARCH_CACHE_KEY + criteria.hashCode() + ":" + pageable.hashCode();
+        String cacheKey = SEARCH_CACHE_KEY + getSearchCacheVersion() + ":" + criteria.hashCode() + ":" + pageable.hashCode();
         
         // Check cache with safe type checking
         if (userId == null) { // Only use cache for anonymous users
@@ -109,7 +110,7 @@ public class HotelService {
         Specification<Hotel> spec = buildSearchSpecification(criteria);
         
         Page<Hotel> hotels = hotelRepository.findAll(spec, pageable);
-        Page<HotelResponse> response = hotels.map(hotel -> mapToResponse(hotel, userId));
+        Page<HotelResponse> response = mapSearchResults(hotels, userId);
         
         // Cache results for anonymous users only (10 minutes) with error handling
         if (userId == null) {
@@ -226,44 +227,120 @@ public class HotelService {
         
         return spec;
     }
-    
-    private HotelResponse mapToResponse(Hotel hotel, UUID userId) {
-        // get all room types for this hotel
-        List<UUID> roomTypeIds = hotel.getRoomTypes() != null ?
-                hotel.getRoomTypes().stream().map(RoomType::getId).collect(Collectors.toList()) :
-                List.of();
 
-        // get availability for each room type
-        Map<UUID, Integer> availabilityMap = roomService.getRoomAvailabilities(roomTypeIds);
-
-        List<RoomTypeResponse> roomTypes = hotel.getRoomTypes() != null ?
-                hotel.getRoomTypes().stream()
-                        .map(roomType -> roomService.mapToResponse(roomType, availabilityMap.getOrDefault(roomType.getId(), 0)))
-                        .collect(Collectors.toList()) : Collections.emptyList();
-        
-        // Calculate price range
-        BigDecimal minPrice = null;
-        BigDecimal maxPrice = null;
-        if (hotel.getRoomTypes() != null && !hotel.getRoomTypes().isEmpty()) {
-            minPrice = hotel.getRoomTypes().stream()
-                    .map(RoomType::getPricePerNight)
-                    .min(BigDecimal::compareTo)
-                    .orElse(null);
-            maxPrice = hotel.getRoomTypes().stream()
-                    .map(RoomType::getPricePerNight)
-                    .max(BigDecimal::compareTo)
-                    .orElse(null);
+    private Page<HotelResponse> mapSearchResults(Page<Hotel> hotels, UUID userId) {
+        List<Hotel> hotelList = hotels.getContent();
+        if (hotelList.isEmpty()) {
+            return hotels.map(hotel -> mapToResponse(hotel, userId));
         }
+
+        List<UUID> hotelIds = hotelList.stream()
+                .map(Hotel::getId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+
+        List<RoomType> pageRoomTypes = roomTypeRepository.findByHotelIdIn(hotelIds);
+        if (pageRoomTypes == null) {
+            pageRoomTypes = List.of();
+        }
+
+        Map<UUID, List<RoomType>> roomTypesByHotelId = pageRoomTypes.stream()
+                .filter(roomType -> roomType.getHotel() != null && roomType.getHotel().getId() != null)
+                .collect(Collectors.groupingBy(roomType -> roomType.getHotel().getId()));
+
+        List<UUID> roomTypeIds = pageRoomTypes.stream()
+                .map(RoomType::getId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+
+        Map<UUID, Integer> availabilityMap = roomTypeIds.isEmpty()
+                ? Map.of()
+                : roomService.getRoomAvailabilities(roomTypeIds);
+
+        Map<UUID, Long> favoriteCounts = getFavoriteCounts(hotelIds);
+        Set<UUID> favoriteHotelIds = getFavoriteHotelIds(userId, hotelIds);
+
+        return hotels.map(hotel -> {
+            UUID hotelId = hotel.getId();
+            List<RoomType> roomTypes = roomTypesByHotelId.getOrDefault(hotelId, List.of());
+            Boolean isFavorite = userId == null ? null : favoriteHotelIds.contains(hotelId);
+            Long favoriteCount = favoriteCounts.getOrDefault(hotelId, 0L);
+            return mapToResponse(hotel, roomTypes, availabilityMap, favoriteCount, isFavorite);
+        });
+    }
+
+    private Map<UUID, Long> getFavoriteCounts(List<UUID> hotelIds) {
+        if (hotelIds.isEmpty()) {
+            return Map.of();
+        }
+
+        List<Object[]> rows = favoriteRepository.countFavoritesByHotelIds(hotelIds);
+        if (rows == null || rows.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<UUID, Long> counts = new HashMap<>();
+        for (Object[] row : rows) {
+            if (row.length >= 2 && row[0] instanceof UUID hotelId && row[1] instanceof Number count) {
+                counts.put(hotelId, count.longValue());
+            }
+        }
+        return counts;
+    }
+
+    private Set<UUID> getFavoriteHotelIds(UUID userId, List<UUID> hotelIds) {
+        if (userId == null || hotelIds.isEmpty()) {
+            return Set.of();
+        }
+
+        List<UUID> favoriteHotelIds = favoriteRepository.findFavoriteHotelIdsByUserIdAndHotelIdIn(userId, hotelIds);
+        if (favoriteHotelIds == null || favoriteHotelIds.isEmpty()) {
+            return Set.of();
+        }
+        return new HashSet<>(favoriteHotelIds);
+    }
+
+    private HotelResponse mapToResponse(Hotel hotel, UUID userId) {
+        List<RoomType> hotelRoomTypes = hotel.getRoomTypes() == null ? List.of() : hotel.getRoomTypes();
+        List<UUID> roomTypeIds = hotelRoomTypes.stream()
+                .map(RoomType::getId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+        Map<UUID, Integer> availabilityMap = roomService.getRoomAvailabilities(roomTypeIds);
         
-        // Check if user has saved this hotel as favorite
         Boolean isFavorite = null;
         if (userId != null) {
             isFavorite = favoriteRepository.existsByUserIdAndHotelId(userId, hotel.getId());
         }
         
-        // Get favorite count
         Long favoriteCount = favoriteRepository.countFavoritesByHotelId(hotel.getId());
         
+        return mapToResponse(hotel, hotelRoomTypes, availabilityMap, favoriteCount, isFavorite);
+    }
+
+    private HotelResponse mapToResponse(
+            Hotel hotel,
+            List<RoomType> hotelRoomTypes,
+            Map<UUID, Integer> availabilityMap,
+            Long favoriteCount,
+            Boolean isFavorite) {
+        List<RoomType> safeRoomTypes = hotelRoomTypes == null ? List.of() : hotelRoomTypes;
+
+        List<RoomTypeResponse> roomTypes = safeRoomTypes.stream()
+                .map(roomType -> roomService.mapToResponse(roomType, availabilityMap.getOrDefault(roomType.getId(), 0)))
+                .collect(Collectors.toList());
+
+        BigDecimal minPrice = safeRoomTypes.stream()
+                .map(RoomType::getPricePerNight)
+                .filter(Objects::nonNull)
+                .min(BigDecimal::compareTo)
+                .orElse(null);
+        BigDecimal maxPrice = safeRoomTypes.stream()
+                .map(RoomType::getPricePerNight)
+                .filter(Objects::nonNull)
+                .max(BigDecimal::compareTo)
+                .orElse(null);
+
         return HotelResponse.builder()
                 .id(hotel.getId())
                 .name(hotel.getName())
@@ -302,13 +379,25 @@ public class HotelService {
     
     private void clearSearchCache() {
         try {
-            Set<String> keys = redisTemplate.keys(SEARCH_CACHE_KEY + "*");
-            if (!keys.isEmpty()) {
-                redisTemplate.delete(keys);
-                log.info("Cleared {} search cache entries", keys.size());
-            }
+            Long version = redisTemplate.opsForValue().increment(SEARCH_CACHE_VERSION_KEY);
+            log.info("Invalidated search cache namespace; version is now {}", version);
         } catch (Exception e) {
             log.error("Error clearing search cache", e);
         }
+    }
+
+    private long getSearchCacheVersion() {
+        try {
+            Object version = redisTemplate.opsForValue().get(SEARCH_CACHE_VERSION_KEY);
+            if (version instanceof Number number) {
+                return number.longValue();
+            }
+            if (version instanceof String value) {
+                return Long.parseLong(value);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to read search cache version, using default namespace: {}", e.getMessage());
+        }
+        return 0L;
     }
 }

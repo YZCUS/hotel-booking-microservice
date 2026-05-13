@@ -5,6 +5,8 @@ import com.hotel.user.dto.JwtResponse;
 import com.hotel.user.dto.LoginRequest;
 import com.hotel.user.dto.RegisterRequest;
 import com.hotel.user.service.AuthService;
+import com.hotel.user.util.InternalServiceUtil;
+import com.hotel.user.util.JwtUtil;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -29,6 +31,12 @@ class AuthControllerTest {
     
     @MockBean
     private AuthService authService;
+
+    @MockBean
+    private JwtUtil jwtUtil;
+
+    @MockBean
+    private InternalServiceUtil internalServiceUtil;
     
     @Autowired
     private ObjectMapper objectMapper;

@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import com.hotel.notification.exception.ServiceCommunicationException;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
@@ -44,7 +45,7 @@ public class NotificationService {
                 .cancellationPolicy("Free cancellation up to 24 hours before check-in")
                 .build();
             
-            emailService.sendBookingConfirmationEmail(data);
+            emailService.sendBookingConfirmationEmail(data).join();
             log.info("Booking confirmation notification sent for booking: {}", event.getBookingId());
             
         } catch (Exception e) {
@@ -70,7 +71,7 @@ public class NotificationService {
                 .totalPrice(event.getTotalPrice())
                 .build();
             
-            emailService.sendBookingCancellationEmail(data);
+            emailService.sendBookingCancellationEmail(data).join();
             log.info("Booking cancellation notification sent for booking: {}", event.getBookingId());
             
         } catch (Exception e) {
@@ -98,7 +99,7 @@ public class NotificationService {
                 .header("X-Internal-Service", "notification-service")
                 .retrieve()
                 .bodyToMono(UserInfo.class)
-                .block();
+                .block(Duration.ofSeconds(5));
             
             if (userInfo == null || userInfo.getEmail() == null || userInfo.getEmail().trim().isEmpty()) {
                 log.error("Invalid user data received for user: {}", userId);
@@ -123,7 +124,7 @@ public class NotificationService {
                 .uri("http://hotel-service:8082/api/v1/hotels/rooms/{roomTypeId}/hotel-details", roomTypeId)
                 .retrieve()
                 .bodyToMono(HotelInfo.class)
-                .block();
+                .block(Duration.ofSeconds(5));
             
             if (hotelInfo == null || hotelInfo.getName() == null || hotelInfo.getName().trim().isEmpty()) {
                 log.error("Invalid hotel data received for room type: {}", roomTypeId);

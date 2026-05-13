@@ -7,6 +7,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
@@ -14,6 +15,9 @@ import java.util.UUID;
 public interface RoomTypeRepository extends JpaRepository<RoomType, UUID> {
     
     List<RoomType> findByHotelId(UUID hotelId);
+
+    @Query("SELECT rt FROM RoomType rt WHERE rt.hotel.id IN :hotelIds")
+    List<RoomType> findByHotelIdIn(@Param("hotelIds") Collection<UUID> hotelIds);
     
     List<RoomType> findByHotelIdAndCapacityGreaterThanEqual(UUID hotelId, Integer capacity);
     

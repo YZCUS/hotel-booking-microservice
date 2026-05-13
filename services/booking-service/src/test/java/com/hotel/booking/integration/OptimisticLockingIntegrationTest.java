@@ -7,9 +7,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.dao.OptimisticLockingFailureException;
-import org.springframework.test.context.TestPropertySource;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
+import org.springframework.test.context.ActiveProfiles;
 
 import java.time.LocalDate;
 import java.util.UUID;
@@ -17,12 +18,10 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.when;
 
 @SpringBootTest
-@TestPropertySource(properties = {
-    "spring.datasource.url=jdbc:h2:mem:testdb",
-    "spring.jpa.hibernate.ddl-auto=create-drop"
-})
+@ActiveProfiles("test")
 class OptimisticLockingIntegrationTest {
 
     @Autowired
@@ -31,6 +30,12 @@ class OptimisticLockingIntegrationTest {
     @Autowired
     private RoomInventoryRepository inventoryRepository;
 
+    @MockBean
+    private CacheManager cacheManager;
+
+    @MockBean
+    private Cache availabilityCache;
+
     private UUID roomTypeId;
     private LocalDate testDate;
 
@@ -38,6 +43,7 @@ class OptimisticLockingIntegrationTest {
     void setUp() {
         roomTypeId = UUID.randomUUID();
         testDate = LocalDate.now().plusDays(1);
+        when(cacheManager.getCache("room-availability")).thenReturn(availabilityCache);
         
         // Initialize inventory for testing
         RoomInventory inventory = RoomInventory.builder()
@@ -49,7 +55,6 @@ class OptimisticLockingIntegrationTest {
     }
 
     @Test
-    @Transactional
     void testOptimisticLocking_ConcurrentReservation() throws ExecutionException, InterruptedException {
         // Given - Two concurrent reservation attempts
         CompletableFuture<Boolean> reservation1 = CompletableFuture.supplyAsync(() -> {
@@ -85,7 +90,6 @@ class OptimisticLockingIntegrationTest {
     }
 
     @Test
-    @Transactional
     void testOptimisticLocking_ReservationExceedsAvailability() throws ExecutionException, InterruptedException {
         // Given - Two concurrent reservations that exceed available inventory
         CompletableFuture<Boolean> reservation1 = CompletableFuture.supplyAsync(() -> {
@@ -118,7 +122,6 @@ class OptimisticLockingIntegrationTest {
     }
 
     @Test
-    @Transactional
     void testOptimisticLocking_ReservationAndRelease() throws ExecutionException, InterruptedException {
         // Given - First reserve some inventory
         boolean reserved = inventoryService.reserveInventory(roomTypeId, testDate, testDate.plusDays(1), 5);

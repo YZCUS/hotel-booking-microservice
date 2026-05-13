@@ -11,8 +11,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.junit.jupiter.MockitoSettings;
-import org.mockito.quality.Strictness;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
@@ -27,7 +25,6 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
-@MockitoSettings(strictness = Strictness.LENIENT)
 class UserServiceTest {
     
     @Mock
@@ -59,12 +56,12 @@ class UserServiceTest {
                 .updatedAt(LocalDateTime.now())
                 .build();
         
-        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
     }
     
     @Test
     void testGetUserById_Success() {
         // Given
+        stubValueOperations();
         when(valueOperations.get(anyString())).thenReturn(null);
         when(userRepository.findActiveUserById(testUserId)).thenReturn(Optional.of(testUser));
         
@@ -86,6 +83,7 @@ class UserServiceTest {
     @Test
     void testGetUserById_FromCache() {
         // Given
+        stubValueOperations();
         UserResponse cachedResponse = UserResponse.builder()
                 .id(testUserId)
                 .email("test@example.com")
@@ -107,6 +105,7 @@ class UserServiceTest {
     @Test
     void testGetUserById_NotFound() {
         // Given
+        stubValueOperations();
         when(valueOperations.get(anyString())).thenReturn(null);
         when(userRepository.findActiveUserById(testUserId)).thenReturn(Optional.empty());
         
@@ -121,6 +120,7 @@ class UserServiceTest {
     @Test
     void testUpdateProfile_Success() {
         // Given
+        stubValueOperations();
         UpdateProfileRequest request = new UpdateProfileRequest("Updated Name", "9876543210");
         when(userRepository.findActiveUserById(testUserId)).thenReturn(Optional.of(testUser));
         when(userRepository.save(any(User.class))).thenReturn(testUser);
@@ -181,5 +181,9 @@ class UserServiceTest {
         
         verify(userRepository).findById(testUserId);
         verify(userRepository, never()).save(any());
+    }
+
+    private void stubValueOperations() {
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
     }
 }

@@ -24,5 +24,6 @@ public class BookingCancelledEvent implements Serializable {
     private BigDecimal totalPrice;
     private LocalDateTime cancelledAt;
     private String reason;
+    @Builder.Default
     private String eventType = "BOOKING_CANCELLED";
 }

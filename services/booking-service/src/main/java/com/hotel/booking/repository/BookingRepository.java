@@ -26,6 +26,10 @@ public interface BookingRepository extends JpaRepository<Booking, UUID> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT b FROM Booking b WHERE b.id = :id AND b.userId = :userId")
     Optional<Booking> findByIdAndUserIdForUpdate(@Param("id") UUID id, @Param("userId") UUID userId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT b FROM Booking b WHERE b.id = :id")
+    Optional<Booking> findByIdForUpdate(@Param("id") UUID id);
     
     List<Booking> findByUserIdAndStatus(UUID userId, BookingStatus status);
     
