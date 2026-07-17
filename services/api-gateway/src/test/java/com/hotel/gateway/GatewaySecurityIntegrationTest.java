@@ -34,6 +34,7 @@ import static org.mockito.Mockito.when;
         "spring.security.jwt.secret=gateway-test-secret-key-with-more-than-64-characters-1234567890abcdef",
         "services.user-service.url=http://127.0.0.1:1",
         "spring.data.redis.password=test",
+        "management.health.redis.enabled=false",
         "app.internal.service-secret=test-internal-secret"
 })
 class GatewaySecurityIntegrationTest {
