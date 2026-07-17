@@ -4,11 +4,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hotel.user.dto.JwtResponse;
 import com.hotel.user.dto.LoginRequest;
 import com.hotel.user.dto.RegisterRequest;
+import com.hotel.user.security.InternalServiceAuthenticationFilter;
+import com.hotel.user.security.JwtAuthenticationEntryPoint;
+import com.hotel.user.security.JwtAuthenticationFilter;
 import com.hotel.user.service.AuthService;
-import com.hotel.user.util.InternalServiceUtil;
-import com.hotel.user.util.JwtUtil;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
@@ -24,6 +26,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @WebMvcTest(AuthController.class)
+@AutoConfigureMockMvc(addFilters = false)
 class AuthControllerTest {
     
     @Autowired
@@ -33,10 +36,13 @@ class AuthControllerTest {
     private AuthService authService;
 
     @MockBean
-    private JwtUtil jwtUtil;
+    private JwtAuthenticationEntryPoint jwtAuthenticationEntryPoint;
 
     @MockBean
-    private InternalServiceUtil internalServiceUtil;
+    private JwtAuthenticationFilter jwtAuthenticationFilter;
+
+    @MockBean
+    private InternalServiceAuthenticationFilter internalServiceAuthenticationFilter;
     
     @Autowired
     private ObjectMapper objectMapper;

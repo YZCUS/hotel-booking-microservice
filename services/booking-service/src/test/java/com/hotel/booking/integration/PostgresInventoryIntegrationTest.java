@@ -101,6 +101,7 @@ class PostgresInventoryIntegrationTest {
         return RoomInventory.builder()
                 .roomTypeId(roomTypeId)
                 .date(date)
+                .totalRooms(5)
                 .availableRooms(availableRooms)
                 .build();
     }

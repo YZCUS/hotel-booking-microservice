@@ -2,13 +2,14 @@ package com.hotel.gateway.filter;
 
 import com.hotel.gateway.config.GatewayApiProperties;
 import com.hotel.gateway.handler.GatewayErrorResponder;
-import com.hotel.gateway.util.IpAddressUtil;
+import com.hotel.gateway.util.InternalServiceTokenProvider;
 import com.hotel.gateway.util.JwtUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.stereotype.Component;
@@ -21,68 +22,84 @@ import java.util.List;
 @RequiredArgsConstructor
 @Slf4j
 public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
+
+    private static final String HOTELS_PATH = "/api/v1/hotels";
+    private static final String HOTEL_EXPORT_PATH = HOTELS_PATH + "/export";
+    private static final List<String> TRUSTED_HEADERS = List.of(
+            "X-User-Id",
+            "X-User-Email",
+            "X-Username",
+            "X-User-Role",
+            "X-Authenticated",
+            "X-Internal-Service",
+            "X-Internal-Token",
+            "X-Service",
+            "X-Gateway",
+            "X-Forwarded-For",
+            "X-Real-IP",
+            "Forwarded"
+    );
     
     private final JwtUtil jwtUtil;
     private final GatewayErrorResponder errorResponder;
     private final GatewayApiProperties gatewayApiProperties;
+    private final InternalServiceTokenProvider internalServiceTokenProvider;
     
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
-        ServerHttpRequest request = exchange.getRequest();
+        ServerHttpRequest request = addTrustedInternalHeaders(removeUntrustedHeaders(exchange.getRequest()));
         String path = request.getPath().value();
         String method = request.getMethod().name();
         
         log.debug("Processing request: {} {}", method, path);
 
-        // Skip authentication for public paths
-        if (isPublicPath(path)) {
-            log.debug("Skipping JWT authentication for public path: {}", path);
-            return chain.filter(exchange);
-        }
-        
-        // Check for internal service communication
-        if (isInternalServicePath(method, path)) {
-            String clientIp = IpAddressUtil.getClientIpAddress(request);
-            if (!isInternalNetwork(clientIp)) {
-                log.warn("Blocking external access to internal service path: {} {} from IP: {}", method, path, clientIp);
-                return errorResponder.createErrorResponse(exchange, HttpStatus.FORBIDDEN, "Access denied: Internal service path");
-            }
-            log.debug("Allowing internal service access to: {} {} from IP: {}", method, path, clientIp);
-            return chain.filter(exchange);
-        }
-        
-        // Extract and validate JWT token
+        ServerWebExchange sanitizedExchange = exchange.mutate().request(request).build();
+        boolean publicRequest = isPublicRequest(request);
         String token = extractToken(request);
-        
+
         if (token == null) {
+            if (publicRequest) {
+                log.debug("Allowing anonymous request to public endpoint: {} {}", method, path);
+                return chain.filter(sanitizedExchange);
+            }
             log.warn("Missing authentication token for: {} {}", method, path);
-            return errorResponder.createErrorResponse(exchange, HttpStatus.UNAUTHORIZED, "Missing authentication token");
+            return errorResponder.createErrorResponse(sanitizedExchange, HttpStatus.UNAUTHORIZED,
+                    "Missing authentication token");
         }
         
         try {
             if (jwtUtil.validateToken(token)) {
                 String userId = jwtUtil.extractUserId(token);
-                String username = jwtUtil.extractUsername(token);
+                String email = jwtUtil.extractEmail(token);
                 String role = jwtUtil.extractRole(token);
-                
-                log.debug("Authenticated user: {} (ID: {}, Role: {})", username, userId, role);
+
+                if (userId == null || userId.isBlank() || email == null || email.isBlank()
+                        || role == null || role.isBlank()) {
+                    log.warn("JWT is missing required identity claims for: {} {}", method, path);
+                    return errorResponder.createErrorResponse(sanitizedExchange, HttpStatus.UNAUTHORIZED,
+                            "Authentication token is missing required claims");
+                }
+
+                log.debug("Authenticated user: {} (ID: {}, Role: {})", email, userId, role);
                 
                 // Add user information to headers for downstream services
                 ServerHttpRequest modifiedRequest = request.mutate()
                     .header("X-User-Id", userId)
-                    .header("X-Username", username != null ? username : "")
-                    .header("X-User-Role", role != null ? role : "USER")
+                    .header("X-User-Email", email)
+                    .header("X-User-Role", role)
                     .header("X-Authenticated", "true")
                     .build();
                 
-                return chain.filter(exchange.mutate().request(modifiedRequest).build());
+                return chain.filter(sanitizedExchange.mutate().request(modifiedRequest).build());
             } else {
                 log.warn("Invalid JWT token for: {} {}", method, path);
-                return errorResponder.createErrorResponse(exchange, HttpStatus.UNAUTHORIZED,"Missing authentication token");
+                return errorResponder.createErrorResponse(sanitizedExchange, HttpStatus.UNAUTHORIZED,
+                        "Invalid or expired authentication token");
             }
         } catch (Exception e) {
             log.error("JWT validation error for: {} {}", method, path, e);
-            return errorResponder.createErrorResponse(exchange, HttpStatus.UNAUTHORIZED, "Token validation failed");
+            return errorResponder.createErrorResponse(sanitizedExchange, HttpStatus.UNAUTHORIZED,
+                    "Token validation failed");
         }
     }
     
@@ -97,61 +114,47 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         return null;
     }
 
-    private boolean isPublicPath(String path) {
-        return gatewayApiProperties.getPublicPaths().stream()
-                .map(p -> p.replace("/**", ""))
-                .anyMatch(path::startsWith);
-    }
-    
-    private boolean isInternalServicePath(String method, String path) {
-        String methodPath = method + ":" + path;
-        return gatewayApiProperties.getInternalServicePaths().stream()
-                .anyMatch(methodPath::startsWith);
-    }
-
-    private boolean isInternalNetwork(String ip) {
-        if (ip == null || "unknown".equals(ip) || ip.equals("localhost")) {
-            return "localhost".equals(ip); // localhost is safe
+    private boolean isPublicRequest(ServerHttpRequest request) {
+        HttpMethod method = request.getMethod();
+        if (HttpMethod.OPTIONS.equals(method)) {
+            return true;
         }
 
-        // check ip with docker internal network ranges
-        for (String cidr : gatewayApiProperties.getInternalNetworkRanges()) {
-            if (isIpInRange(ip, cidr)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private boolean isIpInRange(String ip, String cidr) {
-        try {
-            String[] parts = cidr.split("/");
-            String cidrIp = parts[0];
-            int prefix = Integer.parseInt(parts[1]);
-
-            long ipAddress = ipToLong(java.net.InetAddress.getByName(ip));
-            long cidrIpAddress = ipToLong(java.net.InetAddress.getByName(cidrIp));
-            long mask = (-1L) << (32 - prefix);
-
-            return (ipAddress & mask) == (cidrIpAddress & mask);
-        } catch (Exception e) {
-            log.warn("Failed to check if IP {} is in CIDR range {}: {}", ip, cidr, e.getMessage());
+        String path = request.getPath().value();
+        if (HOTEL_EXPORT_PATH.equals(path)) {
             return false;
         }
+        if (path.equals(HOTELS_PATH) || path.startsWith(HOTELS_PATH + "/")) {
+            return HttpMethod.GET.equals(method) || HttpMethod.HEAD.equals(method);
+        }
+
+        return gatewayApiProperties.getPublicPaths().stream()
+                .anyMatch(pattern -> matchesPublicPath(pattern, path));
     }
 
-    private long ipToLong(java.net.InetAddress ip) {
-        byte[] octets = ip.getAddress();
-        long result = 0;
-        for (byte octet : octets) {
-            result <<= 8;
-            result |= octet & 0xff;
+    private boolean matchesPublicPath(String pattern, String path) {
+        if (pattern.endsWith("/**")) {
+            String basePath = pattern.substring(0, pattern.length() - 3);
+            return path.equals(basePath) || path.startsWith(basePath + "/");
         }
-        return result;
+        return path.equals(pattern);
+    }
+
+    private ServerHttpRequest removeUntrustedHeaders(ServerHttpRequest request) {
+        return request.mutate()
+                .headers(headers -> TRUSTED_HEADERS.forEach(headers::remove))
+                .build();
+    }
+
+    private ServerHttpRequest addTrustedInternalHeaders(ServerHttpRequest request) {
+        return request.mutate()
+                .header("X-Internal-Service", "api-gateway")
+                .header("X-Internal-Token", internalServiceTokenProvider.generateCurrentToken())
+                .build();
     }
     
     @Override
     public int getOrder() {
-        return -100; // Execute before other filters
+        return -300; // Sanitize identity headers before logging and rate limiting.
     }
 }

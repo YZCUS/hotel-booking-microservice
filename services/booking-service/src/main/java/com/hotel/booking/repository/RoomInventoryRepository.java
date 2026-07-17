@@ -34,6 +34,13 @@ public interface RoomInventoryRepository extends JpaRepository<RoomInventory, UU
             @Param("roomTypeId") UUID roomTypeId,
             @Param("startDate") LocalDate startDate,
             @Param("endDate") LocalDate endDate);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT ri FROM RoomInventory ri WHERE ri.roomTypeId = :roomTypeId " +
+           "AND ri.date >= :startDate ORDER BY ri.date")
+    List<RoomInventory> findFutureByRoomTypeIdForUpdate(
+            @Param("roomTypeId") UUID roomTypeId,
+            @Param("startDate") LocalDate startDate);
     
     @Query("SELECT ri FROM RoomInventory ri WHERE ri.roomTypeId = :roomTypeId " +
            "AND ri.date BETWEEN :startDate AND :endDate " +
@@ -43,14 +50,6 @@ public interface RoomInventoryRepository extends JpaRepository<RoomInventory, UU
             @Param("startDate") LocalDate startDate,
             @Param("endDate") LocalDate endDate,
             @Param("requiredRooms") Integer requiredRooms);
-    
-    @Query("SELECT MIN(ri.availableRooms) FROM RoomInventory ri " +
-           "WHERE ri.roomTypeId = :roomTypeId " +
-           "AND ri.date BETWEEN :startDate AND :endDate")
-    Optional<Integer> findMinAvailableRoomsInRange(
-            @Param("roomTypeId") UUID roomTypeId,
-            @Param("startDate") LocalDate startDate,
-            @Param("endDate") LocalDate endDate);
     
     @Query("SELECT COUNT(ri) FROM RoomInventory ri " +
            "WHERE ri.roomTypeId = :roomTypeId " +
@@ -65,4 +64,6 @@ public interface RoomInventoryRepository extends JpaRepository<RoomInventory, UU
     List<RoomInventory> findByRoomTypeIdInAndDate(List<UUID> roomTypeIds, LocalDate date);
 
     void deleteByRoomTypeId(UUID roomTypeId);
+
+    void deleteByRoomTypeIdIn(List<UUID> roomTypeIds);
 }

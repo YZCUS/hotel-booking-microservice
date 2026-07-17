@@ -33,17 +33,18 @@ spring:
           provider_disables_autocommit: true
     open-in-view: false
 
-  redis:
-    host: ${REDIS_HOST:localhost}
-    port: ${REDIS_PORT:6379}
-    password: ${REDIS_PASSWORD}
-    timeout: 2000ms
-    jedis:
-      pool:
-        max-active: 8
-        max-idle: 8
-        min-idle: 0
-        max-wait: -1ms
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+      password: ${SPRING_DATA_REDIS_PASSWORD:}
+      timeout: 2000ms
+      jedis:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+          max-wait: -1ms
 
   rabbitmq:
     host: ${RABBITMQ_HOST:localhost}
@@ -52,6 +53,10 @@ spring:
     password: ${RABBITMQ_PASSWORD}
     virtual-host: /
     connection-timeout: 30000
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
     listener:
       simple:
         retry:
@@ -106,6 +111,17 @@ booking:
     winter-premium: 0.25
     advance-booking-discount: 0.10
     advance-booking-days: 30
+
+services:
+  hotel-service:
+    url: ${HOTEL_SERVICE_URL:http://hotel-service:8082}
+
+app:
+  outbox:
+    schema: booking_svc
+  internal:
+    service-secret: ${INTERNAL_SERVICE_SECRET:secure-shared-secret-change-in-production}
+    allowed-services: api-gateway,hotel-service
 
 # Circuit Breaker Configuration
 resilience4j:

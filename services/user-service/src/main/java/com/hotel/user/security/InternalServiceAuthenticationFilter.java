@@ -31,6 +31,12 @@ public class InternalServiceAuthenticationFilter extends OncePerRequestFilter {
         // Check if this is an internal service call
         if (internalServiceUtil.validateInternalServiceCall(request)) {
             String serviceName = request.getHeader("X-Internal-Service");
+            if ("api-gateway".equals(serviceName)
+                    && "true".equalsIgnoreCase(request.getHeader("X-Authenticated"))) {
+                // Gateway end-user traffic must retain the JWT user's authorities.
+                filterChain.doFilter(request, response);
+                return;
+            }
             log.debug("Authenticating internal service: {}", serviceName);
             
             // Create authentication token for internal service

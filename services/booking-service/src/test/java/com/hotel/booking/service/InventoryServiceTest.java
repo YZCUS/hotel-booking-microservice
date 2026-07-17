@@ -1,6 +1,9 @@
 package com.hotel.booking.service;
 
 import com.hotel.booking.entity.RoomInventory;
+import com.hotel.booking.exception.InventoryNotFoundException;
+import com.hotel.booking.exception.BookingConflictException;
+import com.hotel.booking.repository.BookingRepository;
 import com.hotel.booking.repository.RoomInventoryRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -12,6 +15,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -27,6 +31,9 @@ class InventoryServiceTest {
 
     @Mock
     private RoomInventoryRepository inventoryRepository;
+
+    @Mock
+    private BookingRepository bookingRepository;
 
     @Mock
     private CacheManager cacheManager;
@@ -52,6 +59,7 @@ class InventoryServiceTest {
         inventory1 = RoomInventory.builder()
                 .roomTypeId(roomTypeId)
                 .date(checkIn)
+                .totalRooms(7)
                 .availableRooms(5)
                 .version(0)
                 .build();
@@ -59,6 +67,7 @@ class InventoryServiceTest {
         inventory2 = RoomInventory.builder()
                 .roomTypeId(roomTypeId)
                 .date(checkIn.plusDays(1))
+                .totalRooms(7)
                 .availableRooms(5)
                 .version(0)
                 .build();
@@ -79,8 +88,31 @@ class InventoryServiceTest {
         // Then
         assertTrue(result);
         verify(inventoryRepository, times(2)).save(any(RoomInventory.class));
+        verify(availabilityCache).clear();
         assertEquals(3, inventory1.getAvailableRooms());
         assertEquals(3, inventory2.getAvailableRooms());
+    }
+
+    @Test
+    void reserveInventory_ClearsAvailabilityCacheOnlyAfterCommit() {
+        when(inventoryRepository.findByRoomTypeIdAndDateRangeForUpdate(
+                roomTypeId, checkIn, checkOut.minusDays(1)))
+                .thenReturn(List.of(inventory1, inventory2));
+        when(inventoryRepository.save(any(RoomInventory.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(cacheManager.getCache("room-availability")).thenReturn(availabilityCache);
+
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            assertTrue(inventoryService.reserveInventory(roomTypeId, checkIn, checkOut, 1));
+            verify(availabilityCache, never()).clear();
+
+            TransactionSynchronizationManager.getSynchronizations()
+                    .forEach(synchronization -> synchronization.afterCommit());
+            verify(availabilityCache).clear();
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
     }
 
     @Test
@@ -128,7 +160,7 @@ class InventoryServiceTest {
     @Test
     void releaseInventory_Success() {
         // Given
-        when(inventoryRepository.findByRoomTypeIdAndDateBetween(roomTypeId, checkIn, checkOut.minusDays(1)))
+        when(inventoryRepository.findByRoomTypeIdAndDateRangeForUpdate(roomTypeId, checkIn, checkOut.minusDays(1)))
                 .thenReturn(List.of(inventory1, inventory2));
         when(inventoryRepository.saveAll(anyList()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
@@ -139,6 +171,7 @@ class InventoryServiceTest {
 
         // Then
         verify(inventoryRepository).saveAll(List.of(inventory1, inventory2));
+        verify(availabilityCache).clear();
         assertEquals(7, inventory1.getAvailableRooms());
         assertEquals(7, inventory2.getAvailableRooms());
     }
@@ -146,7 +179,7 @@ class InventoryServiceTest {
     @Test
     void releaseInventory_OptimisticLockingFailure() {
         // Given
-        when(inventoryRepository.findByRoomTypeIdAndDateBetween(roomTypeId, checkIn, checkOut.minusDays(1)))
+        when(inventoryRepository.findByRoomTypeIdAndDateRangeForUpdate(roomTypeId, checkIn, checkOut.minusDays(1)))
                 .thenReturn(List.of(inventory1, inventory2));
         when(inventoryRepository.saveAll(anyList()))
                 .thenThrow(new OptimisticLockingFailureException("Version mismatch"));
@@ -159,8 +192,8 @@ class InventoryServiceTest {
     @Test
     void checkAvailability_Available() {
         // Given
-        when(inventoryRepository.findMinAvailableRoomsInRange(roomTypeId, checkIn, checkOut.minusDays(1)))
-                .thenReturn(Optional.of(5));
+        when(inventoryRepository.findByRoomTypeIdAndDateBetween(roomTypeId, checkIn, checkOut.minusDays(1)))
+                .thenReturn(List.of(inventory1, inventory2));
 
         // When
         boolean result = inventoryService.checkAvailability(roomTypeId, checkIn, checkOut, 3);
@@ -172,8 +205,9 @@ class InventoryServiceTest {
     @Test
     void checkAvailability_NotAvailable() {
         // Given
-        when(inventoryRepository.findMinAvailableRoomsInRange(roomTypeId, checkIn, checkOut.minusDays(1)))
-                .thenReturn(Optional.of(2));
+        inventory1.setAvailableRooms(2);
+        when(inventoryRepository.findByRoomTypeIdAndDateBetween(roomTypeId, checkIn, checkOut.minusDays(1)))
+                .thenReturn(List.of(inventory1, inventory2));
 
         // When
         boolean result = inventoryService.checkAvailability(roomTypeId, checkIn, checkOut, 3);
@@ -185,14 +219,65 @@ class InventoryServiceTest {
     @Test
     void checkAvailability_NoInventoryData() {
         // Given
-        when(inventoryRepository.findMinAvailableRoomsInRange(roomTypeId, checkIn, checkOut.minusDays(1)))
-                .thenReturn(Optional.empty());
+        when(inventoryRepository.findByRoomTypeIdAndDateBetween(roomTypeId, checkIn, checkOut.minusDays(1)))
+                .thenReturn(List.of());
 
         // When
         boolean result = inventoryService.checkAvailability(roomTypeId, checkIn, checkOut, 1);
 
         // Then
         assertFalse(result);
+    }
+
+    @Test
+    void checkAvailability_IncompleteDateRows_ReturnsFalse() {
+        when(inventoryRepository.findByRoomTypeIdAndDateBetween(roomTypeId, checkIn, checkOut.minusDays(1)))
+                .thenReturn(List.of(inventory1));
+
+        assertFalse(inventoryService.checkAvailability(roomTypeId, checkIn, checkOut, 1));
+    }
+
+    @Test
+    void getAvailableRooms_MissingDate_ThrowsInsteadOfPretendingZero() {
+        when(inventoryRepository.findByRoomTypeIdAndDate(roomTypeId, checkIn)).thenReturn(Optional.empty());
+
+        assertThrows(InventoryNotFoundException.class,
+                () -> inventoryService.getAvailableRooms(roomTypeId, checkIn));
+    }
+
+    @Test
+    void setDesiredCapacity_PreservesSoldRooms() {
+        when(inventoryRepository.findFutureByRoomTypeIdForUpdate(eq(roomTypeId), any(LocalDate.class)))
+                .thenReturn(List.of(inventory1, inventory2));
+        when(inventoryRepository.saveAll(anyList())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        inventoryService.setDesiredCapacity(roomTypeId, 10, 2);
+
+        assertEquals(10, inventory1.getTotalRooms());
+        assertEquals(8, inventory1.getAvailableRooms());
+        assertEquals(10, inventory2.getTotalRooms());
+        assertEquals(8, inventory2.getAvailableRooms());
+    }
+
+    @Test
+    void setDesiredCapacity_BelowSoldRooms_RejectsUpdate() {
+        when(inventoryRepository.findFutureByRoomTypeIdForUpdate(eq(roomTypeId), any(LocalDate.class)))
+                .thenReturn(List.of(inventory1, inventory2));
+
+        assertThrows(BookingConflictException.class,
+                () -> inventoryService.setDesiredCapacity(roomTypeId, 1, 2));
+
+        verify(inventoryRepository, never()).saveAll(anyList());
+    }
+
+    @Test
+    void deleteInventory_WithActiveBooking_ReturnsConflict() {
+        when(bookingRepository.existsActiveBookingForRoomType(roomTypeId)).thenReturn(true);
+
+        assertThrows(BookingConflictException.class,
+                () -> inventoryService.deleteInventory(roomTypeId));
+
+        verify(inventoryRepository, never()).deleteByRoomTypeId(any());
     }
 
     @Test
@@ -210,27 +295,38 @@ class InventoryServiceTest {
         // Then
         ArgumentCaptor<List<RoomInventory>> captor = ArgumentCaptor.forClass(List.class);
         verify(inventoryRepository).saveAll(captor.capture());
-        assertEquals(8, captor.getValue().size()); // 7 days + today
-        assertTrue(captor.getValue().stream().allMatch(inventory -> inventory.getAvailableRooms() == 10));
+        assertEquals(396, captor.getValue().size());
+        assertTrue(captor.getValue().stream().allMatch(inventory ->
+                inventory.getTotalRooms() == 10 && inventory.getAvailableRooms() == 10));
     }
 
     @Test
     void initializeInventory_SkipExisting() {
         // Given
         LocalDate today = LocalDate.now();
-        List<RoomInventory> existingInventories = List.of(
-                RoomInventory.builder().roomTypeId(roomTypeId).date(today).availableRooms(10).build(),
-                RoomInventory.builder().roomTypeId(roomTypeId).date(today.plusDays(1)).availableRooms(10).build(),
-                RoomInventory.builder().roomTypeId(roomTypeId).date(today.plusDays(2)).availableRooms(10).build()
-        );
+        List<RoomInventory> completeHorizon = java.util.stream.IntStream.rangeClosed(0, 395)
+                .mapToObj(offset -> RoomInventory.builder()
+                        .roomTypeId(roomTypeId)
+                        .date(today.plusDays(offset))
+                        .totalRooms(10)
+                        .availableRooms(10)
+                        .build())
+                .toList();
         when(inventoryRepository.findByRoomTypeIdAndDateBetween(eq(roomTypeId), any(), any()))
-                .thenReturn(existingInventories);
+                .thenReturn(completeHorizon);
 
         // When
         inventoryService.initializeInventory(roomTypeId, 10, 2);
 
         // Then
         verify(inventoryRepository, never()).saveAll(anyList());
+    }
+
+    @Test
+    void checkAvailability_InvalidDateRangeIsRejected() {
+        assertThrows(IllegalArgumentException.class,
+                () -> inventoryService.checkAvailability(roomTypeId, checkOut, checkIn, 1));
+        verifyNoInteractions(inventoryRepository);
     }
 
     private void stubAvailabilityCache() {

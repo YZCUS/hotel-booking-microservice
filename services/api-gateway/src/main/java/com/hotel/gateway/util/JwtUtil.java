@@ -53,7 +53,7 @@ public class JwtUtil {
         }
     }
     
-    public String extractUsername(String token) {
+    public String extractEmail(String token) {
         try {
             Claims claims = Jwts.parserBuilder()
                 .setSigningKey(getSigningKey())
@@ -79,7 +79,7 @@ public class JwtUtil {
             return claims.get("role", String.class);
         } catch (Exception e) {
             log.debug("Failed to extract role from JWT", e);
-            return "USER"; // Default role
+            return null;
         }
     }
     

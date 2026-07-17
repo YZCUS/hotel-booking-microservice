@@ -2,12 +2,28 @@ package com.hotel.gateway.config;
 
 import org.springframework.cloud.gateway.route.RouteLocator;
 import org.springframework.cloud.gateway.route.builder.RouteLocatorBuilder;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 @Configuration
 public class GatewayConfig {
-    
+
+    @Value("${services.user-service.url:http://user-service:8081}")
+    private String userServiceUrl;
+
+    @Value("${services.hotel-service.url:http://hotel-service:8082}")
+    private String hotelServiceUrl;
+
+    @Value("${services.booking-service.url:http://booking-service:8083}")
+    private String bookingServiceUrl;
+
+    @Value("${services.search-service.url:http://search-service:8084}")
+    private String searchServiceUrl;
+
+    @Value("${services.notification-service.url:http://notification-service:8085}")
+    private String notificationServiceUrl;
+
     @Bean
     public RouteLocator customRouteLocator(RouteLocatorBuilder builder) {
         return builder.routes()
@@ -18,7 +34,7 @@ public class GatewayConfig {
                     .rewritePath("/api/v1/auth/(?<segment>.*)", "/api/v1/auth/${segment}")
                     .addRequestHeader("X-Service", "user-service")
                     .addRequestHeader("X-Gateway", "api-gateway"))
-                .uri("http://user-service:8081"))
+                .uri(userServiceUrl))
             
             // User Service routes (JWT required)
             .route("user-service", r -> r
@@ -27,7 +43,7 @@ public class GatewayConfig {
                     .rewritePath("/api/v1/users/(?<segment>.*)", "/api/v1/users/${segment}")
                     .addRequestHeader("X-Service", "user-service")
                     .addRequestHeader("X-Gateway", "api-gateway"))
-                .uri("http://user-service:8081"))
+                .uri(userServiceUrl))
             
             // Hotel Service routes (public read, JWT for write)
             .route("hotel-service", r -> r
@@ -39,7 +55,15 @@ public class GatewayConfig {
                     .circuitBreaker(config -> config
                         .setName("hotelServiceCB")
                         .setFallbackUri("forward:/fallback/hotels")))
-                .uri("http://hotel-service:8082"))
+                .uri(hotelServiceUrl))
+
+            // Hotel favorites are a separate authenticated controller surface.
+            .route("hotel-favorites-service", r -> r
+                .path("/api/v1/favorites", "/api/v1/favorites/**")
+                .filters(f -> f
+                    .addRequestHeader("X-Service", "hotel-service")
+                    .addRequestHeader("X-Gateway", "api-gateway"))
+                .uri(hotelServiceUrl))
             
             // Booking Service routes (JWT required)
             .route("booking-service", r -> r
@@ -51,7 +75,7 @@ public class GatewayConfig {
                     .circuitBreaker(config -> config
                         .setName("bookingServiceCB")
                         .setFallbackUri("forward:/fallback/bookings")))
-                .uri("http://booking-service:8083"))
+                .uri(bookingServiceUrl))
             
             // Inventory Service routes (for availability checks)
             .route("inventory-service", r -> r
@@ -60,7 +84,7 @@ public class GatewayConfig {
                     .rewritePath("/api/v1/inventory/(?<segment>.*)", "/api/v1/inventory/${segment}")
                     .addRequestHeader("X-Service", "booking-service")
                     .addRequestHeader("X-Gateway", "api-gateway"))
-                .uri("http://booking-service:8083"))
+                .uri(bookingServiceUrl))
             
             // Search Service routes (public)
             .route("search-service", r -> r
@@ -72,28 +96,33 @@ public class GatewayConfig {
                     .circuitBreaker(config -> config
                         .setName("searchServiceCB")
                         .setFallbackUri("forward:/fallback/search")))
-                .uri("http://search-service:8084"))
+                .uri(searchServiceUrl))
             
             // Health check routes
             .route("user-service-health", r -> r
                 .path("/health/user-service")
                 .filters(f -> f.rewritePath("/health/user-service", "/actuator/health"))
-                .uri("http://user-service:8081"))
+                .uri(userServiceUrl))
             
             .route("hotel-service-health", r -> r
                 .path("/health/hotel-service")
                 .filters(f -> f.rewritePath("/health/hotel-service", "/actuator/health"))
-                .uri("http://hotel-service:8082"))
+                .uri(hotelServiceUrl))
             
             .route("booking-service-health", r -> r
                 .path("/health/booking-service")
                 .filters(f -> f.rewritePath("/health/booking-service", "/actuator/health"))
-                .uri("http://booking-service:8083"))
+                .uri(bookingServiceUrl))
             
             .route("search-service-health", r -> r
                 .path("/health/search-service")
                 .filters(f -> f.rewritePath("/health/search-service", "/actuator/health"))
-                .uri("http://search-service:8084"))
+                .uri(searchServiceUrl))
+
+            .route("notification-service-health", r -> r
+                .path("/health/notification-service")
+                .filters(f -> f.rewritePath("/health/notification-service", "/actuator/health"))
+                .uri(notificationServiceUrl))
             
             .build();
     }

@@ -12,9 +12,10 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
-import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -51,6 +52,23 @@ public class RoomService {
         
         return mapToResponse(roomType);
     }
+
+    public RoomTypeResponse getRoomTypeCatalog(UUID roomTypeId) {
+        RoomType roomType = roomTypeRepository.findById(roomTypeId)
+                .orElseThrow(() -> new RoomTypeNotFoundException(
+                        "Room type not found with id: " + roomTypeId));
+        return RoomTypeResponse.builder()
+                .id(roomType.getId())
+                .hotelId(roomType.getHotel().getId())
+                .hotelName(roomType.getHotel().getName())
+                .name(roomType.getName())
+                .description(roomType.getDescription())
+                .capacity(roomType.getCapacity())
+                .pricePerNight(roomType.getPricePerNight())
+                .totalInventory(roomType.getTotalInventory())
+                .createdAt(roomType.getCreatedAt())
+                .build();
+    }
     
     public List<RoomTypeResponse> getRoomsByHotelAndCapacity(UUID hotelId, Integer minCapacity) {
         log.info("Getting rooms for hotel: {} with minimum capacity: {}", hotelId, minCapacity);
@@ -82,8 +100,14 @@ public class RoomService {
         if (roomTypeIds == null || roomTypeIds.isEmpty()) {
             return Map.of();
         }
-        // block() 是為了在事務性方法中簡化處理，更好的做法是讓整個鏈路都反應式
-        return inventoryService.getAvailableRoomsForTodayBatch(roomTypeIds).block();
+        try {
+            // Availability enriches catalog reads; an inventory outage must not hide the catalog.
+            Map<UUID, Integer> availability = inventoryService.getAvailableRoomsForTodayBatch(roomTypeIds).block();
+            return availability == null ? Map.of() : availability;
+        } catch (RuntimeException error) {
+            log.warn("Booking inventory unavailable while enriching {} room types", roomTypeIds.size(), error);
+            return Map.of();
+        }
     }
 
     
@@ -102,10 +126,12 @@ public class RoomService {
                 .totalInventory(request.getTotalInventory())
                 .build();
         
-        RoomType saved = roomTypeRepository.save(roomType);
-        
-        // Initialize inventory for the room type
-        initializeInventory(saved);
+        RoomType saved = roomTypeRepository.saveAndFlush(roomType);
+
+        compensateOnRollback(
+                "remove inventory for rolled-back room creation " + saved.getId(),
+                () -> inventoryService.deleteInventory(saved.getId()));
+        inventoryService.initializeInventory(saved.getId(), saved.getTotalInventory());
         
         return mapToResponse(saved);
     }
@@ -115,6 +141,8 @@ public class RoomService {
         
         RoomType roomType = roomTypeRepository.findById(roomTypeId)
                 .orElseThrow(() -> new RoomTypeNotFoundException("Room type not found"));
+
+        int previousInventory = roomType.getTotalInventory();
         
         roomType.setName(request.getName());
         roomType.setDescription(request.getDescription());
@@ -122,8 +150,13 @@ public class RoomService {
         roomType.setPricePerNight(request.getPricePerNight());
         roomType.setTotalInventory(request.getTotalInventory());
         
-        RoomType updated = roomTypeRepository.save(roomType);
-        
+        RoomType updated = roomTypeRepository.saveAndFlush(roomType);
+
+        compensateOnRollback(
+                "restore capacity for rolled-back room update " + roomTypeId,
+                () -> inventoryService.setDesiredCapacity(roomTypeId, previousInventory));
+        inventoryService.setDesiredCapacity(roomTypeId, request.getTotalInventory());
+
         return mapToResponse(updated);
     }
     
@@ -132,29 +165,34 @@ public class RoomService {
         
         RoomType roomType = roomTypeRepository.findById(roomTypeId)
                 .orElseThrow(() -> new RoomTypeNotFoundException("Room type not found"));
-        
+
         roomTypeRepository.delete(roomType);
+        roomTypeRepository.flush();
+
+        compensateOnRollback(
+                "restore inventory for rolled-back room deletion " + roomTypeId,
+                () -> inventoryService.initializeInventory(roomTypeId, roomType.getTotalInventory()));
+        inventoryService.deleteInventory(roomTypeId);
     }
     
     public Long getRoomCountByHotel(UUID hotelId) {
         return roomTypeRepository.countByHotelId(hotelId);
     }
     
-    private void initializeInventory(RoomType roomType) {
-        log.info("Initializing inventory for room type: {}", roomType.getId());
-        
-        // Initialize inventory for the next 90 days
-        LocalDate startDate = LocalDate.now();
-        LocalDate endDate = startDate.plusDays(90);
-        
-        for (LocalDate date = startDate; !date.isAfter(endDate); date = date.plusDays(1)) {
-            // This should ideally publish an event or call an inventory service
-            // For now, we'll just log the action
-            log.debug("Would initialize inventory for room {} on date {} with {} rooms",
-                    roomType.getId(), date, roomType.getTotalInventory());
+    public void deleteInventories(Map<UUID, Integer> inventoryCapacities) {
+        if (inventoryCapacities == null || inventoryCapacities.isEmpty()) {
+            return;
         }
-        
-        // TODO: Publish InventoryInitializedEvent or call Inventory Service
+        Map<UUID, Integer> capacities = Map.copyOf(inventoryCapacities);
+        compensateOnRollback("restore inventories for rolled-back hotel deletion", () ->
+                capacities.forEach((roomTypeId, capacity) -> {
+                    try {
+                        inventoryService.initializeInventory(roomTypeId, capacity);
+                    } catch (RuntimeException error) {
+                        log.error("Failed to compensate inventory for room type {}", roomTypeId, error);
+                    }
+                }));
+        inventoryService.deleteInventories(capacities.keySet().stream().toList());
     }
 
     public RoomTypeResponse mapToResponse(RoomType roomType, Integer availableRooms) {
@@ -168,14 +206,39 @@ public class RoomService {
                 .pricePerNight(roomType.getPricePerNight())
                 .totalInventory(roomType.getTotalInventory())
                 .createdAt(roomType.getCreatedAt())
-                .availableRooms(availableRooms) // 使用傳入的庫存
-                .isAvailable(availableRooms != null && availableRooms > 0)
+                .availableRooms(availableRooms)
+                .isAvailable(availableRooms == null ? null : availableRooms > 0)
                 .build();
     }
     
     private RoomTypeResponse mapToResponse(RoomType roomType) {
-        // Get real-time availability for today
-        Integer availableRooms = inventoryService.getAvailableRoomsForToday(roomType.getId());
+        Integer availableRooms = null;
+        try {
+            availableRooms = inventoryService.getAvailableRoomsForToday(roomType.getId());
+        } catch (RuntimeException error) {
+            log.warn("Booking inventory unavailable while enriching room type {}", roomType.getId(), error);
+        }
         return mapToResponse(roomType, availableRooms);
+    }
+
+    private void compensateOnRollback(String description, Runnable compensation) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            log.debug("No active transaction; rollback compensation not registered for {}", description);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                if (status == STATUS_COMMITTED) {
+                    return;
+                }
+                try {
+                    compensation.run();
+                    log.warn("Applied rollback compensation: {}", description);
+                } catch (RuntimeException error) {
+                    log.error("Rollback compensation failed: {}", description, error);
+                }
+            }
+        });
     }
 }

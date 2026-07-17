@@ -26,6 +26,9 @@ public class RoomInventory {
     
     @Column(nullable = false)
     private LocalDate date;
+
+    @Column(name = "total_rooms", nullable = false)
+    private Integer totalRooms;
     
     @Column(name = "available_rooms", nullable = false)
     private Integer availableRooms;

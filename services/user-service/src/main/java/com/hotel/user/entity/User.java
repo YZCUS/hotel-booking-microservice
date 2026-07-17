@@ -34,6 +34,10 @@ public class User {
     private String fullName;
     
     private String phone;
+
+    @Column(nullable = false, length = 30)
+    @Builder.Default
+    private String role = "USER";
     
     @Column(name = "is_active")
     @Builder.Default

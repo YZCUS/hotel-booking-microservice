@@ -1,6 +1,6 @@
 package com.hotel.booking.service;
 
-import com.hotel.booking.exception.ServiceCommunicationException;
+import com.hotel.booking.dto.RoomTypeResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -17,54 +17,20 @@ import java.util.UUID;
 @Slf4j
 public class PricingService {
     
-    private final RoomPricingClient roomPricingClient;
+    private final HotelCatalogClient hotelCatalogClient;
     
     public BigDecimal calculateTotalPrice(UUID roomTypeId, LocalDate checkIn, LocalDate checkOut) {
-        log.info("Calculating total price for roomType {} from {} to {}", roomTypeId, checkIn, checkOut);
-        
-        try {
-            // Get room type price from hotel service (now async with fallback)
-            BigDecimal pricePerNight = roomPricingClient.getRoomTypePriceAsync(roomTypeId)
-                .toFuture()
-                .get(); // Only for backward compatibility, will be removed later
-            
-            // Calculate number of nights
-            long numberOfNights = ChronoUnit.DAYS.between(checkIn, checkOut);
-            
-            // Calculate base price
-            BigDecimal basePrice = pricePerNight.multiply(BigDecimal.valueOf(numberOfNights));
-            
-            // Apply dynamic pricing adjustments
-            BigDecimal adjustedPrice = applyDynamicPricing(basePrice, checkIn, checkOut, roomTypeId);
-            
-            log.info("Total price calculated: {} for {} nights (base: {}, adjusted: {})", 
-                adjustedPrice, numberOfNights, basePrice, adjustedPrice);
-            
-            return adjustedPrice;
-            
-        } catch (Exception e) {
-            log.error("Error calculating price for roomType: {}", roomTypeId, e);
-            throw new ServiceCommunicationException("Unable to calculate pricing: " + e.getMessage(), e);
-        }
+        return calculateTotalPrice(hotelCatalogClient.getRoomType(roomTypeId), checkIn, checkOut);
     }
-    
-    // New async method for future controller updates
+
+    public BigDecimal calculateTotalPrice(RoomTypeResponse roomType, LocalDate checkIn, LocalDate checkOut) {
+        long numberOfNights = ChronoUnit.DAYS.between(checkIn, checkOut);
+        BigDecimal basePrice = roomType.getPricePerNight().multiply(BigDecimal.valueOf(numberOfNights));
+        return applyDynamicPricing(basePrice, checkIn, checkOut, roomType.getId());
+    }
+
     public Mono<BigDecimal> calculateTotalPriceAsync(UUID roomTypeId, LocalDate checkIn, LocalDate checkOut) {
-        log.info("Calculating total price async for roomType {} from {} to {}", roomTypeId, checkIn, checkOut);
-        
-        return roomPricingClient.getRoomTypePriceAsync(roomTypeId)
-            .map(pricePerNight -> {
-                long numberOfNights = ChronoUnit.DAYS.between(checkIn, checkOut);
-                BigDecimal basePrice = pricePerNight.multiply(BigDecimal.valueOf(numberOfNights));
-                BigDecimal adjustedPrice = applyDynamicPricing(basePrice, checkIn, checkOut, roomTypeId);
-                
-                log.info("Total price calculated async: {} for {} nights", adjustedPrice, numberOfNights);
-                return adjustedPrice;
-            })
-            .onErrorMap(e -> {
-                log.error("Error calculating price async for roomType: {}", roomTypeId, e);
-                return new ServiceCommunicationException("Unable to calculate pricing: " + e.getMessage(), e);
-            });
+        return Mono.fromCallable(() -> calculateTotalPrice(roomTypeId, checkIn, checkOut));
     }
     
     private BigDecimal applyDynamicPricing(BigDecimal basePrice, LocalDate checkIn, LocalDate checkOut, UUID roomTypeId) {

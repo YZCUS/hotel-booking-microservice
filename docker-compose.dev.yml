@@ -50,9 +50,13 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/hotel_reservation
       SPRING_DATASOURCE_USERNAME: hotel_user
       SPRING_DATASOURCE_PASSWORD: hotel_password
-      SPRING_REDIS_HOST: redis
-      SPRING_REDIS_PASSWORD: hotel_redis_pass
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PASSWORD: hotel_redis_pass
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_USERNAME: hotel_user
+      SPRING_RABBITMQ_PASSWORD: hotel_pass
       JWT_SECRET: myVerySecureSecretKey123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz
+      INTERNAL_SERVICE_SECRET: secure-shared-secret-change-in-production
       SPRING_JPA_HIBERNATE_DDL_AUTO: validate
       SPRING_JPA_PROPERTIES_HIBERNATE_DEFAULT_SCHEMA: user_svc
       SPRING_JPA_SHOW_SQL: true
@@ -70,8 +74,13 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/hotel_reservation
       SPRING_DATASOURCE_USERNAME: hotel_user
       SPRING_DATASOURCE_PASSWORD: hotel_password
-      SPRING_REDIS_HOST: redis
-      SPRING_REDIS_PASSWORD: hotel_redis_pass
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PASSWORD: hotel_redis_pass
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_USERNAME: hotel_user
+      SPRING_RABBITMQ_PASSWORD: hotel_pass
+      BOOKING_SERVICE_URL: http://booking-service:8083
+      INTERNAL_SERVICE_SECRET: secure-shared-secret-change-in-production
       SPRING_JPA_HIBERNATE_DDL_AUTO: validate
       SPRING_JPA_PROPERTIES_HIBERNATE_DEFAULT_SCHEMA: hotel_svc
       SPRING_JPA_SHOW_SQL: true
@@ -88,11 +97,13 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/hotel_reservation
       SPRING_DATASOURCE_USERNAME: hotel_user
       SPRING_DATASOURCE_PASSWORD: hotel_password
-      SPRING_REDIS_HOST: redis
-      SPRING_REDIS_PASSWORD: hotel_redis_pass
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PASSWORD: hotel_redis_pass
       SPRING_RABBITMQ_HOST: rabbitmq
       SPRING_RABBITMQ_USERNAME: hotel_user
       SPRING_RABBITMQ_PASSWORD: hotel_pass
+      HOTEL_SERVICE_URL: http://hotel-service:8082
+      INTERNAL_SERVICE_SECRET: secure-shared-secret-change-in-production
       SPRING_JPA_HIBERNATE_DDL_AUTO: validate
       SPRING_JPA_PROPERTIES_HIBERNATE_DEFAULT_SCHEMA: booking_svc
       SPRING_JPA_SHOW_SQL: true
@@ -109,9 +120,11 @@ services:
       SPRING_PROFILES_ACTIVE: dev
       MEILISEARCH_HOST: http://meilisearch:7700
       MEILISEARCH_API_KEY: masterKey123456789
+      HOTEL_SERVICE_URL: http://hotel-service:8082
       SPRING_RABBITMQ_HOST: rabbitmq
       SPRING_RABBITMQ_USERNAME: hotel_user
       SPRING_RABBITMQ_PASSWORD: hotel_pass
+      INTERNAL_SERVICE_SECRET: secure-shared-secret-change-in-production
       LOGGING_LEVEL_COM_HOTEL: DEBUG
     volumes:
       - ./logs:/app/logs
@@ -130,6 +143,9 @@ services:
       SPRING_MAIL_USERNAME: ${MAIL_USERNAME:-your-email@gmail.com}
       SPRING_MAIL_PASSWORD: ${MAIL_PASSWORD:-your-app-password}
       SPRING_MAIL_FROM: ${MAIL_FROM:-noreply@hotel.com}
+      USER_SERVICE_URL: http://user-service:8081
+      HOTEL_SERVICE_URL: http://hotel-service:8082
+      INTERNAL_SERVICE_SECRET: secure-shared-secret-change-in-production
       LOGGING_LEVEL_COM_HOTEL: DEBUG
       LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_MAIL: DEBUG
     volumes:
@@ -141,9 +157,10 @@ services:
       - "8080:8080"
     environment:
       SPRING_PROFILES_ACTIVE: dev
-      SPRING_REDIS_HOST: redis
-      SPRING_REDIS_PASSWORD: hotel_redis_pass
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PASSWORD: hotel_redis_pass
       JWT_SECRET: myVerySecureSecretKey123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz
+      INTERNAL_SERVICE_SECRET: secure-shared-secret-change-in-production
       CORS_ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://localhost:8080
       LOGGING_LEVEL_COM_HOTEL: DEBUG
       LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_CLOUD_GATEWAY: DEBUG

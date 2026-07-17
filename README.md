@@ -1,276 +1,171 @@
 # Hotel Booking Microservices
 
-A modern, cloud-native hotel reservation system built with Spring Boot microservices architecture.
+A demo-ready hotel reservation platform built with Spring Boot 3, Java 21, RabbitMQ, Redis, PostgreSQL, Meilisearch, and a Vite React frontend.
 
 ## Architecture
 
-**Microservices:**
-- **API Gateway** (8080) - Routing, authentication, rate limiting
-- **User Service** (8081) - User management, JWT authentication  
-- **Hotel Service** (8082) - Hotel and room management
-- **Booking Service** (8083) - Reservations with optimistic locking
-- **Search Service** (8084) - Hotel search with Meilisearch
-- **Notification Service** (8085) - Async email notifications
+```text
+React demo UI (3000)
+        |
+API Gateway (8080): JWT, CORS, rate limiting, routing
+        |
+        +--> User Service (8081): registration, login, profiles
+        +--> Hotel Service (8082): hotels, rooms, favorites
+        +--> Booking Service (8083): reservations, inventory, pricing
+        +--> Search Service (8084): Meilisearch indexing/search
+        +--> Notification Service (8085): email notifications
 
-**Infrastructure:**
-- **PostgreSQL** (5432) - Primary database
-- **Redis** (6379) - Caching and sessions
-- **RabbitMQ** (5672/15672) - Message queue
-- **Meilisearch** (7700) - Search engine
-- **Prometheus** (9090) - Metrics
-- **Grafana** (3001) - Monitoring dashboards
+PostgreSQL schemas: user_svc, hotel_svc, booking_svc, search_svc
+Redis: cache and rate-limit state
+RabbitMQ: booking, hotel, and user domain events
+Prometheus/Grafana: metrics and dashboards
+```
+
+Local development uses one PostgreSQL instance with service-owned schemas for speed. The production direction is database-per-service or independently managed schemas with API/event-only integration.
+
+## Features
+
+- Browse seeded hotels and room types.
+- Register or log in with JWT authentication.
+- Create and cancel bookings through the API Gateway.
+- Reserve inventory atomically with optimistic locking.
+- Publish booking, hotel, and user events to RabbitMQ.
+- Keep hotel search indexes up to date from hotel events.
+- Send booking and welcome email notifications asynchronously.
+- View service health in the React demo UI.
 
 ## Quick Start
 
-### Prerequisites
+Prerequisites:
+
 - Docker 20.10+
-- Docker Compose 2.0+
-- 8GB RAM, 10GB disk space
+- Docker Compose 2.x
+- Java 21 for local Gradle tests
+- Node 20 only when running the frontend outside Docker
 
-### Development
-```bash
-# Clone repository
-git clone <repository-url>
-cd hotel-booking-microservices
-
-# Start development environment
-make dev
-
-# Or using docker-compose directly
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
-```
-
-### Production
-```bash
-# Start production environment
-make prod
-
-# Or using docker-compose directly  
-docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
-```
-
-## Available Commands
+Start the full demo stack:
 
 ```bash
-make dev         # Start development environment
-make dev-build   # Build and start development
-make prod        # Start production environment
-make prod-build  # Build and start production
-make down        # Stop all services
-make logs        # View logs
-make health      # Check service health
-make clean       # Clean up containers and volumes
+make dev-build
 ```
 
-## Health Checks
+Open:
+
+- Frontend: http://localhost:3000
+- API Gateway: http://localhost:8080
+- RabbitMQ: http://localhost:15672 (hotel_user/hotel_pass)
+- Grafana: http://localhost:3001 (admin/admin123)
+- Prometheus: http://localhost:9090
+
+Check health:
 
 ```bash
-curl http://localhost:8080/actuator/health  # API Gateway
-curl http://localhost:8081/actuator/health  # User Service
-curl http://localhost:8082/actuator/health  # Hotel Service
-curl http://localhost:8083/actuator/health  # Booking Service
-curl http://localhost:8084/actuator/health  # Search Service
-curl http://localhost:8085/actuator/health  # Notification Service
+make health
 ```
 
-## Monitoring
+## Demo Script
 
-- **Prometheus**: http://localhost:9090
-- **Grafana**: http://localhost:3001 (admin/admin123)
-- **RabbitMQ Management**: http://localhost:15672 (hotel_user/hotel_pass)
+1. Open http://localhost:3000.
+2. Confirm service health from the top strip.
+3. Select a hotel and room.
+4. Register with the seeded demo form, or log in with an existing user.
+5. Check room availability for the prefilled future dates.
+6. Create a booking.
+7. Cancel it while it is still outside the 24-hour cancellation window.
 
-## Database Schema
+The seeded room inventory is initialized for the next 395 days from database bootstrap. Pick dates inside that range for the most reliable demo.
 
-Single PostgreSQL database with service-specific schemas:
-- `user_svc` - User accounts and authentication
-- `hotel_svc` - Hotels, room types, user favorites
-- `booking_svc` - Bookings and room inventory
-- `search_svc` - Search history
+## Local Backend Commands
 
-## Key Features
-
-### Security
-- JWT authentication with configurable secrets
-- BCrypt password hashing
-- Role-based access control
-- API rate limiting and CORS
-
-### Performance
-- Redis caching for frequently accessed data
-- Optimistic locking for inventory management
-- Async processing with RabbitMQ
-- Full-text search with Meilisearch
-
-### Reliability
-- Event-driven architecture
-- Health checks and monitoring
-- Graceful error handling
-- Transaction integrity
-
-## Development
-
-### Build All Services
 ```bash
 ./gradlew build
-```
-
-### Run Tests
-```bash
 ./gradlew test
-```
-
-### Run Single Service Locally
-```bash
+./gradlew :services:booking-service:test
 ./gradlew :services:user-service:bootRun
 ```
 
+## Local Frontend Commands
 
-## Demo-Ready Quick Walkthrough
-
-1. Start stack: `make dev`
-2. Wait for health checks: `make health`
-3. Register and login through gateway:
-   - `POST /api/v1/auth/register`
-   - `POST /api/v1/auth/login`
-4. List hotels: `GET /api/v1/hotels`
-5. Create booking: `POST /api/v1/bookings`
-6. Cancel booking (outside 24h check-in window): `PUT /api/v1/bookings/{id}/cancel`
-
-> Note: A frontend website is not included in this repository. For UI demos, connect an external frontend to the API gateway at `http://localhost:8080`.
-
-## Architecture Documentation
-
-- Detailed architecture and migration guidance: `docs/architecture.md`
-- Current local setup uses a shared PostgreSQL instance with service-specific schemas.
-- Recommended production direction is service-owned databases and API/event-only integration.
-
-## Local Setup (Without Docker)
-
-Prerequisites:
-- Java 21
-- Gradle 8+
-- PostgreSQL 15
-- Redis 7
-- RabbitMQ 3
-- Meilisearch 1.x
-
-Run services individually:
 ```bash
-./gradlew :services:user-service:bootRun
-./gradlew :services:hotel-service:bootRun
-./gradlew :services:booking-service:bootRun
-./gradlew :services:search-service:bootRun
-./gradlew :services:notification-service:bootRun
-./gradlew :services:api-gateway:bootRun
+cd frontend
+npm install
+npm run dev
+npm run build
+npm test -- --run
 ```
 
-## Testing Strategy (TDD-oriented)
+The frontend defaults to `http://localhost:8080/api/v1`. Override it with:
 
-- Write/adjust failing tests first for bug fixes and edge cases.
-- Focus test layers:
-  - unit tests for services and business rules
-  - integration tests for locking/retry behavior
-- Run all tests: `./gradlew test`
-- Run booking service tests only: `./gradlew :services:booking-service:test`
-
-## API Endpoints
-
-All endpoints are accessed through the API Gateway at `http://localhost:8080/api/v1/`
-
-### Authentication
-- `POST /auth/register` - User registration
-- `POST /auth/login` - User login
-- `GET /auth/profile` - Get user profile
-
-### Hotels
-- `GET /hotels` - List hotels with filters
-- `GET /hotels/{id}` - Get hotel details
-- `GET /hotels/{id}/rooms` - Get room types
-
-### Bookings
-- `POST /bookings` - Create booking
-- `GET /bookings/{id}` - Get booking details
-- `PUT /bookings/{id}/cancel` - Cancel booking
-- `GET /bookings/user/{userId}` - Get user bookings
-
-### Search
-- `GET /search/hotels` - Search hotels
-- `GET /search/suggestions` - Get search suggestions
-
-## Environment Configuration
-
-Create `.env` file for custom configuration:
-
-```env
-# JWT Configuration
-JWT_SECRET=your-secret-key
-
-# Database
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=hotel_reservation
-DB_USER=hotel_user
-DB_PASSWORD=hotel_password
-
-# Redis
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_PASSWORD=hotel_redis_pass
-
-# Email Configuration
-MAIL_HOST=smtp.gmail.com
-MAIL_PORT=587
-MAIL_USERNAME=your-email@gmail.com
-MAIL_PASSWORD=your-app-password
-
-# Search Engine
-MEILISEARCH_HOST=localhost
-MEILISEARCH_PORT=7700
-MEILISEARCH_API_KEY=your-master-key
-```
-
-## Production Deployment
-
-### Using Docker Images
 ```bash
-# Build and push images
-make build
-docker tag hotel-booking-user-service:latest your-registry/user-service:v1.0.0
-docker push your-registry/user-service:v1.0.0
-
-# Deploy with production compose
-docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+VITE_API_BASE_URL=http://localhost:8080/api/v1 npm run dev
 ```
 
-### Production Checklist
-- [ ] Configure strong JWT secrets
-- [ ] Set up SSL/TLS certificates
-- [ ] Configure database backups
-- [ ] Set up log aggregation
-- [ ] Configure monitoring alerts
-- [ ] Review resource limits
-- [ ] Secure RabbitMQ and Redis
+## API Examples
 
-## Technology Stack
+Register:
 
-- **Language**: Java 21
-- **Framework**: Spring Boot 3.2, Spring Cloud Gateway
-- **Database**: PostgreSQL 15
-- **Cache**: Redis 7
-- **Message Queue**: RabbitMQ 3
-- **Search**: Meilisearch 1.x
-- **Build**: Gradle 8.x
-- **Monitoring**: Prometheus, Grafana
-- **Containerization**: Docker, Docker Compose
+```bash
+curl -X POST http://localhost:8080/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"demo@example.com","password":"password123","fullName":"Demo Guest","phone":"+1-555-0100"}'
+```
 
-## Contributing
+List hotels:
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+```bash
+curl http://localhost:8080/api/v1/hotels
+```
 
-## License
+Create booking:
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+```bash
+curl -X POST http://localhost:8080/api/v1/bookings \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <jwt>" \
+  -H "Idempotency-Key: <stable-unique-key>" \
+  -d '{"userId":"<user-id>","roomTypeId":"660e8400-e29b-41d4-a716-446655440001","checkInDate":"2026-05-17","checkOutDate":"2026-05-19","guests":2}'
+```
+
+Cancel booking:
+
+```bash
+curl -X PUT http://localhost:8080/api/v1/bookings/<booking-id>/cancel \
+  -H "Authorization: Bearer <jwt>"
+```
+
+## Make Targets
+
+```bash
+make dev         # Start development stack
+make dev-build   # Rebuild and start development stack
+make dev-down    # Stop development stack
+make infra-up    # Start PostgreSQL, Redis, RabbitMQ, Meilisearch
+make logs-f      # Follow all logs
+make health      # Check service health endpoints
+make clean       # Remove containers, networks, and volumes
+```
+
+## Configuration
+
+Use `.env.example` as the template. Keep these values environment-driven:
+
+- `JWT_SECRET`
+- `INTERNAL_SERVICE_SECRET`
+- `DB_*`
+- `REDIS_*`
+- `RABBITMQ_*`
+- `MEILISEARCH_*`
+- `MAIL_*`
+- service URLs such as `HOTEL_SERVICE_URL`, `BOOKING_SERVICE_URL`, and `USER_SERVICE_URL`
+
+Do not commit real secrets.
+
+## Troubleshooting
+
+- `validate` fails on startup: rebuild or reset the local PostgreSQL volume so `init-db/init.sql` can add missing version columns.
+- Booking creation says no inventory: choose dates within the initialized inventory window or call the inventory initialization endpoint.
+- Emails fail locally: the notification service still processes events, but SMTP needs valid `MAIL_*` credentials.
+- Frontend cannot reach APIs: confirm the gateway is up on port `8080` and `CORS_ALLOWED_ORIGINS` includes `http://localhost:3000`.
+- Rabbit events do not flow: confirm RabbitMQ is healthy and all services share the same exchange/routing key configuration.
+
+More details are in [docs/architecture.md](docs/architecture.md).

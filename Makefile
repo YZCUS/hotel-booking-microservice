@@ -124,11 +124,11 @@ logs-notify:
 # Infrastructure services only
 infra-up:
 	@echo "🚀 Starting infrastructure services..."
-	docker-compose up -d postgres redis rabbitmq meilisearch
+	docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres redis rabbitmq meilisearch
 
 infra-down:
 	@echo "🛑 Stopping infrastructure services..."
-	docker-compose stop postgres redis rabbitmq meilisearch
+	docker-compose -f docker-compose.yml -f docker-compose.dev.yml stop postgres redis rabbitmq meilisearch
 
 # Cleaning
 clean:
@@ -146,14 +146,13 @@ clean-all:
 # Testing
 test:
 	@echo "🧪 Running tests for all services..."
-	docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec user-service ./gradlew test
-	docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec hotel-service ./gradlew test
-	docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec booking-service ./gradlew test
+	./gradlew test
+	npm --prefix frontend test -- --run
 
 # Database operations
 db-migrate:
-	@echo "📊 Running database migrations..."
-	docker-compose exec postgres psql -U hotel_user -d hotel_reservation -c "SELECT version();"
+	@echo "📊 Applying idempotent database stabilization migration..."
+	docker-compose exec -T postgres psql -v ON_ERROR_STOP=1 -U hotel_user -d hotel_reservation -f /docker-entrypoint-initdb.d/zz-20260717-stabilization.sql
 
 db-backup:
 	@echo "💾 Creating database backup..."
@@ -163,11 +162,11 @@ db-backup:
 health:
 	@echo "🏥 Checking service health..."
 	@echo "API Gateway: $$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/actuator/health || echo "DOWN")"
-	@echo "User Service: $$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/actuator/health || echo "DOWN")"
-	@echo "Hotel Service: $$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8082/actuator/health || echo "DOWN")"
-	@echo "Booking Service: $$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8083/actuator/health || echo "DOWN")"
-	@echo "Search Service: $$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8084/actuator/health || echo "DOWN")"
-	@echo "Notification Service: $$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8085/actuator/health || echo "DOWN")"
+	@echo "User Service: $$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/health/user-service || echo "DOWN")"
+	@echo "Hotel Service: $$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/health/hotel-service || echo "DOWN")"
+	@echo "Booking Service: $$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/health/booking-service || echo "DOWN")"
+	@echo "Search Service: $$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/health/search-service || echo "DOWN")"
+	@echo "Notification Service: $$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/health/notification-service || echo "DOWN")"
 
 # Monitoring
 monitoring-up:

@@ -1,4 +1,6 @@
 dependencies {
+    implementation project(':services:event-outbox')
+
     // Spring Boot starters
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-webflux' // Added for WebClient support
@@ -8,6 +10,7 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'org.springframework.boot:spring-boot-starter-cache'
     implementation 'org.springframework.boot:spring-boot-starter-security'
+    implementation 'org.springframework.boot:spring-boot-starter-amqp'
     
     // JWT for token validation
     implementation 'io.jsonwebtoken:jjwt-api:0.11.5'

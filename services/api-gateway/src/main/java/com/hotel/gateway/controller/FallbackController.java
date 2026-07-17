@@ -3,7 +3,6 @@ package com.hotel.gateway.controller;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -15,7 +14,7 @@ import java.util.Map;
 @Slf4j
 public class FallbackController {
     
-    @GetMapping("/hotels")
+    @RequestMapping("/hotels")
     public ResponseEntity<Map<String, Object>> hotelServiceFallback() {
         log.warn("Hotel service fallback triggered");
         
@@ -29,7 +28,7 @@ public class FallbackController {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(response);
     }
     
-    @GetMapping("/bookings")
+    @RequestMapping("/bookings")
     public ResponseEntity<Map<String, Object>> bookingServiceFallback() {
         log.warn("Booking service fallback triggered");
         
@@ -43,7 +42,7 @@ public class FallbackController {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(response);
     }
     
-    @GetMapping("/search")
+    @RequestMapping("/search")
     public ResponseEntity<Map<String, Object>> searchServiceFallback() {
         log.warn("Search service fallback triggered");
         
@@ -58,7 +57,7 @@ public class FallbackController {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(response);
     }
     
-    @GetMapping("/users")
+    @RequestMapping("/users")
     public ResponseEntity<Map<String, Object>> userServiceFallback() {
         log.warn("User service fallback triggered");
         

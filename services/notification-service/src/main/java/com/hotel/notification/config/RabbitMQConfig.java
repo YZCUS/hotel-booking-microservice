@@ -19,17 +19,25 @@ public class RabbitMQConfig {
     public static final String BOOKING_EXCHANGE = "booking.exchange";
     public static final String USER_EXCHANGE = "user.exchange";
     
-    public static final String BOOKING_CREATED_QUEUE = "booking.created.queue";
-    public static final String BOOKING_CANCELLED_QUEUE = "booking.cancelled.queue";
-    public static final String USER_REGISTERED_QUEUE = "user.registered.queue";
+    public static final String BOOKING_CREATED_QUEUE = "booking.created.queue.v2";
+    public static final String BOOKING_CANCELLED_QUEUE = "booking.cancelled.queue.v2";
+    public static final String USER_REGISTERED_QUEUE = "user.registered.queue.v2";
     
     public static final String NOTIFICATION_QUEUE = "notification.queue";
-    public static final String EMAIL_QUEUE = "email.queue";
+    public static final String EMAIL_QUEUE = "email.queue.v2";
     
     // Routing keys
-    public static final String BOOKING_CREATED_ROUTING_KEY = "booking.created";
-    public static final String BOOKING_CANCELLED_ROUTING_KEY = "booking.cancelled";
-    public static final String USER_REGISTERED_ROUTING_KEY = "user.registered";
+    public static final String BOOKING_CREATED_ROUTING_KEY = "booking.created.v2";
+    public static final String BOOKING_CANCELLED_ROUTING_KEY = "booking.cancelled.v2";
+    public static final String USER_REGISTERED_ROUTING_KEY = "user.registered.v2";
+
+    public static final String BOOKING_DLX = BOOKING_EXCHANGE + ".dlx.v2";
+    public static final String USER_DLX = USER_EXCHANGE + ".dlx.v2";
+    public static final String EMAIL_DLX = "email.exchange.dlx.v2";
+    public static final String BOOKING_CREATED_DLQ = "booking.created.dlq.v2";
+    public static final String BOOKING_CANCELLED_DLQ = "booking.cancelled.dlq.v2";
+    public static final String USER_REGISTERED_DLQ = "user.registered.dlq.v2";
+    public static final String EMAIL_DLQ = "email.dlq.v2";
     
     @Bean
     public TopicExchange bookingExchange() {
@@ -44,8 +52,8 @@ public class RabbitMQConfig {
     @Bean
     public Queue bookingCreatedQueue() {
         return QueueBuilder.durable(BOOKING_CREATED_QUEUE)
-                .withArgument("x-dead-letter-exchange", BOOKING_EXCHANGE + ".dlx")
-                .withArgument("x-dead-letter-routing-key", "booking.created.dlq")
+                .withArgument("x-dead-letter-exchange", BOOKING_DLX)
+                .withArgument("x-dead-letter-routing-key", BOOKING_CREATED_DLQ)
                 .withArgument("x-message-ttl", 1800000) // 30 minutes TTL for booking notifications
                 .build();
     }
@@ -53,8 +61,8 @@ public class RabbitMQConfig {
     @Bean
     public Queue bookingCancelledQueue() {
         return QueueBuilder.durable(BOOKING_CANCELLED_QUEUE)
-                .withArgument("x-dead-letter-exchange", BOOKING_EXCHANGE + ".dlx")
-                .withArgument("x-dead-letter-routing-key", "booking.cancelled.dlq")
+                .withArgument("x-dead-letter-exchange", BOOKING_DLX)
+                .withArgument("x-dead-letter-routing-key", BOOKING_CANCELLED_DLQ)
                 .withArgument("x-message-ttl", 1800000) // 30 minutes TTL for booking notifications
                 .build();
     }
@@ -62,8 +70,8 @@ public class RabbitMQConfig {
     @Bean
     public Queue userRegisteredQueue() {
         return QueueBuilder.durable(USER_REGISTERED_QUEUE)
-                .withArgument("x-dead-letter-exchange", USER_EXCHANGE + ".dlx")
-                .withArgument("x-dead-letter-routing-key", "user.registered.dlq")
+                .withArgument("x-dead-letter-exchange", USER_DLX)
+                .withArgument("x-dead-letter-routing-key", USER_REGISTERED_DLQ)
                 .withArgument("x-message-ttl", 7200000) // 2 hours TTL for welcome emails (less critical)
                 .build();
     }
@@ -71,8 +79,8 @@ public class RabbitMQConfig {
     @Bean
     public Queue emailQueue() {
         return QueueBuilder.durable(EMAIL_QUEUE)
-                .withArgument("x-dead-letter-exchange", "email.exchange.dlx")
-                .withArgument("x-dead-letter-routing-key", "email.dlq")
+                .withArgument("x-dead-letter-exchange", EMAIL_DLX)
+                .withArgument("x-dead-letter-routing-key", EMAIL_DLQ)
                 .withArgument("x-message-ttl", 3600000) // 1 hour TTL for general emails
                 .build();
     }
@@ -112,38 +120,38 @@ public class RabbitMQConfig {
     
     // Dead Letter Queue setup
     @Bean
-    public FanoutExchange bookingDeadLetterExchange() {
-        return new FanoutExchange(BOOKING_EXCHANGE + ".dlx");
+    public DirectExchange bookingDeadLetterExchange() {
+        return new DirectExchange(BOOKING_DLX);
     }
     
     @Bean
-    public FanoutExchange userDeadLetterExchange() {
-        return new FanoutExchange(USER_EXCHANGE + ".dlx");
+    public DirectExchange userDeadLetterExchange() {
+        return new DirectExchange(USER_DLX);
     }
     
     @Bean
-    public FanoutExchange emailDeadLetterExchange() {
-        return new FanoutExchange("email.exchange.dlx");
+    public DirectExchange emailDeadLetterExchange() {
+        return new DirectExchange(EMAIL_DLX);
     }
     
     @Bean
     public Queue bookingCreatedDeadLetterQueue() {
-        return new Queue("booking.created.dlq", true);
+        return new Queue(BOOKING_CREATED_DLQ, true);
     }
     
     @Bean
     public Queue bookingCancelledDeadLetterQueue() {
-        return new Queue("booking.cancelled.dlq", true);
+        return new Queue(BOOKING_CANCELLED_DLQ, true);
     }
     
     @Bean
     public Queue userRegisteredDeadLetterQueue() {
-        return new Queue("user.registered.dlq", true);
+        return new Queue(USER_REGISTERED_DLQ, true);
     }
     
     @Bean
     public Queue emailDeadLetterQueue() {
-        return new Queue("email.dlq", true);
+        return new Queue(EMAIL_DLQ, true);
     }
     
     // Dead Letter Queue Bindings
@@ -151,28 +159,32 @@ public class RabbitMQConfig {
     public Binding bookingCreatedDLQBinding() {
         return BindingBuilder
                 .bind(bookingCreatedDeadLetterQueue())
-                .to(bookingDeadLetterExchange());
+                .to(bookingDeadLetterExchange())
+                .with(BOOKING_CREATED_DLQ);
     }
     
     @Bean
     public Binding bookingCancelledDLQBinding() {
         return BindingBuilder
                 .bind(bookingCancelledDeadLetterQueue())
-                .to(bookingDeadLetterExchange());
+                .to(bookingDeadLetterExchange())
+                .with(BOOKING_CANCELLED_DLQ);
     }
     
     @Bean
     public Binding userRegisteredDLQBinding() {
         return BindingBuilder
                 .bind(userRegisteredDeadLetterQueue())
-                .to(userDeadLetterExchange());
+                .to(userDeadLetterExchange())
+                .with(USER_REGISTERED_DLQ);
     }
     
     @Bean
     public Binding emailDLQBinding() {
         return BindingBuilder
                 .bind(emailDeadLetterQueue())
-                .to(emailDeadLetterExchange());
+                .to(emailDeadLetterExchange())
+                .with(EMAIL_DLQ);
     }
     
     @Bean

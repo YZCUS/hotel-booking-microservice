@@ -6,21 +6,20 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import reactor.core.publisher.Mono;
+import com.hotel.booking.dto.RoomTypeResponse;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class PricingServiceTest {
 
     @Mock
-    private RoomPricingClient roomPricingClient;
+    private HotelCatalogClient hotelCatalogClient;
 
     @InjectMocks
     private PricingService pricingService;
@@ -30,8 +29,14 @@ class PricingServiceTest {
     @BeforeEach
     void setUp() {
         roomTypeId = UUID.randomUUID();
-        when(roomPricingClient.getRoomTypePriceAsync(any(UUID.class)))
-                .thenReturn(Mono.just(BigDecimal.valueOf(100.00)));
+        
+        RoomTypeResponse mockResponse = RoomTypeResponse.builder()
+                .id(roomTypeId)
+                .capacity(2)
+                .pricePerNight(BigDecimal.valueOf(100.00))
+                .build();
+
+        when(hotelCatalogClient.getRoomType(roomTypeId)).thenReturn(mockResponse);
     }
 
     @Test

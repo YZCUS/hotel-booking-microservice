@@ -1,5 +1,6 @@
 package com.hotel.search.listener;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.hotel.search.config.RabbitMQConfig;
 import com.hotel.search.model.HotelDocument;
 import com.hotel.search.service.IndexService;
@@ -95,6 +96,7 @@ public class HotelEventListener {
     }
     
     // Event classes - these would typically be in a shared library
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class HotelCreatedEvent {
         private UUID hotelId;
         private String name;
@@ -133,6 +135,7 @@ public class HotelEventListener {
         public void setImageUrls(List<String> imageUrls) { this.imageUrls = imageUrls; }
     }
     
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class HotelUpdatedEvent extends HotelCreatedEvent {
         private Boolean isActive;
         
@@ -140,6 +143,7 @@ public class HotelEventListener {
         public void setIsActive(Boolean isActive) { this.isActive = isActive; }
     }
     
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class HotelDeletedEvent {
         private UUID hotelId;
         

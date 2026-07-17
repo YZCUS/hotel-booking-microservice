@@ -1,5 +1,6 @@
 package com.hotel.notification.service;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.hotel.notification.dto.BookingConfirmationData;
 import com.hotel.notification.dto.HotelInfo;
 import com.hotel.notification.dto.UserInfo;
@@ -7,12 +8,16 @@ import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import com.hotel.notification.exception.ServiceCommunicationException;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.Base64;
 import java.util.UUID;
 
 @Service
@@ -22,6 +27,27 @@ public class NotificationService {
     
     private final EmailService emailService;
     private final WebClient.Builder webClientBuilder;
+
+    @Value("${services.user-service.url:http://user-service:8081}")
+    private String userServiceUrl;
+
+    @Value("${services.hotel-service.url:http://hotel-service:8082}")
+    private String hotelServiceUrl;
+
+    @Value("${app.internal.service-name:notification-service}")
+    private String serviceName;
+
+    @Value("${app.internal.service-secret:secure-shared-secret-change-in-production}")
+    private String serviceSecret;
+
+    @Value("${app.internal.service-header:X-Internal-Service}")
+    private String serviceHeader;
+
+    @Value("${app.internal.token-header:X-Internal-Token}")
+    private String tokenHeader;
+
+    @Value("${notification.http.timeout:3s}")
+    private Duration httpTimeout;
     
     public void sendBookingConfirmation(BookingCreatedEvent event) {
         try {
@@ -82,11 +108,12 @@ public class NotificationService {
     
     public void sendWelcomeMessage(UserRegisteredEvent event) {
         try {
-            emailService.sendWelcomeEmail(event.getEmail(), event.getFullName());
+            emailService.sendWelcomeEmail(event.getEmail(), event.getFullName()).join();
             log.info("Welcome notification sent to user: {}", event.getUserId());
             
         } catch (Exception e) {
             log.error("Failed to send welcome notification to user: {}", event.getUserId(), e);
+            throw new RuntimeException("Failed to send welcome notification", e);
         }
     }
     
@@ -95,11 +122,13 @@ public class NotificationService {
             WebClient webClient = webClientBuilder.build();
             
             UserInfo userInfo = webClient.get()
-                .uri("http://user-service:8081/api/v1/users/{userId}", userId)
-                .header("X-Internal-Service", "notification-service")
+                .uri(userServiceUrl + "/api/v1/users/{userId}", userId)
+                .header(serviceHeader, serviceName)
+                .header(tokenHeader, generateInternalToken())
                 .retrieve()
                 .bodyToMono(UserInfo.class)
-                .block(Duration.ofSeconds(5));
+                .timeout(httpTimeout)
+                .block();
             
             if (userInfo == null || userInfo.getEmail() == null || userInfo.getEmail().trim().isEmpty()) {
                 log.error("Invalid user data received for user: {}", userId);
@@ -121,10 +150,13 @@ public class NotificationService {
             
             // Get room type info which includes hotel details
             HotelInfo hotelInfo = webClient.get()
-                .uri("http://hotel-service:8082/api/v1/hotels/rooms/{roomTypeId}/hotel-details", roomTypeId)
+                .uri(hotelServiceUrl + "/api/v1/hotels/rooms/{roomTypeId}/hotel-details", roomTypeId)
+                .header(serviceHeader, serviceName)
+                .header(tokenHeader, generateInternalToken())
                 .retrieve()
                 .bodyToMono(HotelInfo.class)
-                .block(Duration.ofSeconds(5));
+                .timeout(httpTimeout)
+                .block();
             
             if (hotelInfo == null || hotelInfo.getName() == null || hotelInfo.getName().trim().isEmpty()) {
                 log.error("Invalid hotel data received for room type: {}", roomTypeId);
@@ -139,10 +171,23 @@ public class NotificationService {
             throw new ServiceCommunicationException("Cannot fetch hotel details for notification");
         }
     }
+
+    private String generateInternalToken() {
+        try {
+            long currentTimeMinutes = System.currentTimeMillis() / (1000 * 60);
+            String data = serviceName + ":" + serviceSecret + ":" + currentTimeMinutes;
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(data.getBytes(StandardCharsets.UTF_8));
+            return Base64.getEncoder().encodeToString(hash).substring(0, 32);
+        } catch (Exception e) {
+            throw new ServiceCommunicationException("Cannot generate internal service token");
+        }
+    }
     
     // Event classes - these would typically be in a shared library
     @Getter
     @Setter
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class BookingCreatedEvent {
         // Getters and setters
         private UUID bookingId;
@@ -157,6 +202,7 @@ public class NotificationService {
     
     @Getter
     @Setter
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class BookingCancelledEvent {
         // Getters and setters
         private UUID bookingId;
@@ -171,6 +217,7 @@ public class NotificationService {
 
     @Getter
     @Setter
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class UserRegisteredEvent {
         private UUID userId;
         private String email;

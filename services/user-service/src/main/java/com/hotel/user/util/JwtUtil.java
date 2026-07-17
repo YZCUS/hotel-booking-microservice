@@ -29,10 +29,11 @@ public class JwtUtil {
         return Keys.hmacShaKeyFor(keyBytes);
     }
     
-    public String generateToken(String email, UUID userId) {
+    public String generateToken(String email, UUID userId, String role) {
         return Jwts.builder()
                 .setSubject(email)
                 .claim("userId", userId.toString())
+                .claim("role", role)
                 .setIssuedAt(new Date())
                 .setExpiration(new Date(System.currentTimeMillis() + expiration))
                 .signWith(getSigningKey(), SignatureAlgorithm.HS512)
@@ -46,6 +47,10 @@ public class JwtUtil {
     public UUID extractUserId(String token) {
         String userIdStr = extractClaim(token, claims -> claims.get("userId", String.class));
         return UUID.fromString(userIdStr);
+    }
+
+    public String extractRole(String token) {
+        return extractClaim(token, claims -> claims.get("role", String.class));
     }
     
     public Date extractExpiration(String token) {

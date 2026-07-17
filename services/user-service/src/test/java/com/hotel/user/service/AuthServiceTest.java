@@ -4,6 +4,7 @@ import com.hotel.user.dto.JwtResponse;
 import com.hotel.user.dto.LoginRequest;
 import com.hotel.user.dto.RegisterRequest;
 import com.hotel.user.entity.User;
+import com.hotel.user.event.EventPublisher;
 import com.hotel.user.exception.EmailAlreadyExistsException;
 import com.hotel.user.repository.UserRepository;
 import com.hotel.user.util.JwtUtil;
@@ -37,6 +38,9 @@ class AuthServiceTest {
     
     @Mock
     private JwtUtil jwtUtil;
+
+    @Mock
+    private EventPublisher eventPublisher;
     
     @InjectMocks
     private AuthService authService;
@@ -53,6 +57,7 @@ class AuthServiceTest {
                 .passwordHash("hashedPassword")
                 .fullName("Test User")
                 .phone("1234567890")
+                .role("USER")
                 .isActive(true)
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
@@ -66,7 +71,7 @@ class AuthServiceTest {
         when(userRepository.existsByEmail(request.getEmail())).thenReturn(false);
         when(passwordEncoder.encode(request.getPassword())).thenReturn("hashedPassword");
         when(userRepository.save(any(User.class))).thenReturn(testUser);
-        when(jwtUtil.generateToken(anyString(), any(UUID.class))).thenReturn("jwt-token");
+        when(jwtUtil.generateToken(anyString(), any(UUID.class), anyString())).thenReturn("jwt-token");
         
         // When
         JwtResponse response = authService.register(request);
@@ -81,7 +86,8 @@ class AuthServiceTest {
         verify(userRepository).existsByEmail(request.getEmail());
         verify(passwordEncoder).encode(request.getPassword());
         verify(userRepository).save(any(User.class));
-        verify(jwtUtil).generateToken(testUser.getEmail(), testUser.getId());
+        verify(jwtUtil).generateToken(testUser.getEmail(), testUser.getId(), testUser.getRole());
+        verify(eventPublisher).publishUserRegistered(any());
     }
     
     @Test
@@ -103,10 +109,11 @@ class AuthServiceTest {
     @Test
     void testLogin_Success() {
         // Given
+        testUser.setRole("ADMIN");
         LoginRequest request = new LoginRequest("test@example.com", "password");
         when(userRepository.findByEmail(request.getEmail())).thenReturn(Optional.of(testUser));
         when(passwordEncoder.matches(request.getPassword(), testUser.getPasswordHash())).thenReturn(true);
-        when(jwtUtil.generateToken(testUser.getEmail(), testUser.getId())).thenReturn("jwt-token");
+        when(jwtUtil.generateToken(testUser.getEmail(), testUser.getId(), testUser.getRole())).thenReturn("jwt-token");
         
         // When
         JwtResponse response = authService.login(request);
@@ -119,7 +126,7 @@ class AuthServiceTest {
         
         verify(userRepository).findByEmail(request.getEmail());
         verify(passwordEncoder).matches(request.getPassword(), testUser.getPasswordHash());
-        verify(jwtUtil).generateToken(testUser.getEmail(), testUser.getId());
+        verify(jwtUtil).generateToken(testUser.getEmail(), testUser.getId(), testUser.getRole());
     }
     
     @Test
@@ -151,7 +158,7 @@ class AuthServiceTest {
         
         verify(userRepository).findByEmail(request.getEmail());
         verify(passwordEncoder).matches(request.getPassword(), testUser.getPasswordHash());
-        verify(jwtUtil, never()).generateToken(anyString(), any());
+        verify(jwtUtil, never()).generateToken(anyString(), any(UUID.class), anyString());
     }
     
     @Test

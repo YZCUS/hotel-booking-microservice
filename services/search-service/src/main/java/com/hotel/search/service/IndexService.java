@@ -2,21 +2,32 @@ package com.hotel.search.service;
 
 import com.meilisearch.sdk.Client;
 import com.meilisearch.sdk.Index;
+import com.meilisearch.sdk.model.DocumentsQuery;
+import com.meilisearch.sdk.model.Results;
 import com.meilisearch.sdk.model.Settings;
+import com.meilisearch.sdk.model.Task;
 import com.meilisearch.sdk.model.TaskInfo;
+import com.meilisearch.sdk.model.TaskStatus;
 import com.hotel.search.model.HotelDocument;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 @Service
@@ -29,6 +40,21 @@ public class IndexService {
     
     @Autowired(required = false)
     private WebClient.Builder webClientBuilder;
+
+    @Value("${services.hotel-service.url:http://hotel-service:8082}")
+    private String hotelServiceUrl;
+
+    @Value("${app.internal.service-name:search-service}")
+    private String serviceName;
+
+    @Value("${app.internal.service-secret:secure-shared-secret-change-in-production}")
+    private String serviceSecret;
+
+    @Value("${app.internal.service-header:X-Internal-Service}")
+    private String serviceHeader;
+
+    @Value("${app.internal.token-header:X-Internal-Token}")
+    private String tokenHeader;
     
     public static final String HOTEL_INDEX = "hotels";
     private static final int BATCH_SIZE = 100;
@@ -96,6 +122,7 @@ public class IndexService {
                     "latitude",
                     "longitude",
                     "imageUrls",
+                    "roomTypes",
                     "totalRooms",
                     "availableRooms",
                     "averageRating",
@@ -187,12 +214,10 @@ public class IndexService {
                 ));
                 
                 String json = objectMapper.writeValueAsString(List.of(hotelMap));
-                TaskInfo taskInfo = index.addDocuments(json);
-                waitForTask(taskInfo);
+                waitForSuccessfulTask(index, index.addDocuments(json));
             } else {
                 String json = objectMapper.writeValueAsString(List.of(hotel));
-                TaskInfo taskInfo = index.addDocuments(json);
-                waitForTask(taskInfo);
+                waitForSuccessfulTask(index, index.addDocuments(json));
             }
             
             log.info("Hotel indexed successfully: {}", hotel.getId());
@@ -213,7 +238,9 @@ public class IndexService {
             // Process in batches
             for (int i = 0; i < hotels.size(); i += BATCH_SIZE) {
                 int end = Math.min(i + BATCH_SIZE, hotels.size());
-                List<HotelDocument> batch = hotels.subList(i, end);
+                List<HotelDocument> batch = hotels.subList(i, end).stream()
+                        .map(this::normalizeProjection)
+                        .toList();
                 
                 // Add geo coordinates to each hotel
                 List<Map<String, Object>> hotelMaps = batch.stream()
@@ -230,8 +257,7 @@ public class IndexService {
                     .collect(Collectors.toList());
                 
                 String json = objectMapper.writeValueAsString(hotelMaps);
-                TaskInfo taskInfo = index.addDocuments(json);
-                waitForTask(taskInfo);
+                waitForSuccessfulTask(index, index.addDocuments(json));
                 
                 log.info("Indexed batch of {} hotels", batch.size());
             }
@@ -256,12 +282,10 @@ public class IndexService {
                 ));
                 
                 String json = objectMapper.writeValueAsString(List.of(hotelMap));
-                TaskInfo taskInfo = index.updateDocuments(json);
-                waitForTask(taskInfo);
+                waitForSuccessfulTask(index, index.updateDocuments(json));
             } else {
                 String json = objectMapper.writeValueAsString(List.of(hotel));
-                TaskInfo taskInfo = index.updateDocuments(json);
-                waitForTask(taskInfo);
+                waitForSuccessfulTask(index, index.updateDocuments(json));
             }
             
             log.info("Hotel updated successfully: {}", hotel.getId());
@@ -274,8 +298,7 @@ public class IndexService {
     public void deleteHotel(String hotelId) {
         try {
             Index index = meilisearchClient.index(HOTEL_INDEX);
-            TaskInfo taskInfo = index.deleteDocument(hotelId);
-            waitForTask(taskInfo);
+            waitForSuccessfulTask(index, index.deleteDocument(hotelId));
             log.info("Hotel deleted successfully: {}", hotelId);
         } catch (Exception e) {
             log.error("Failed to delete hotel: {}", hotelId, e);
@@ -286,8 +309,7 @@ public class IndexService {
     public void clearIndex() {
         try {
             Index index = meilisearchClient.index(HOTEL_INDEX);
-            TaskInfo taskInfo = index.deleteAllDocuments();
-            waitForTask(taskInfo);
+            waitForSuccessfulTask(index, index.deleteAllDocuments());
             log.info("Hotel index cleared successfully");
         } catch (Exception e) {
             log.error("Failed to clear hotel index", e);
@@ -307,22 +329,157 @@ public class IndexService {
             
             WebClient webClient = webClientBuilder.build();
             
-            // Fetch hotels from hotel service
-            List<HotelDocument> hotels = webClient.get()
-                .uri("http://hotel-service:8082/api/v1/hotels/export")
+            JsonNode exportPayload = webClient.get()
+                .uri(hotelServiceUrl + "/api/v1/hotels/export")
+                .header(serviceHeader, serviceName)
+                .header(tokenHeader, generateInternalToken())
                 .retrieve()
-                .bodyToFlux(HotelDocument.class)
-                .collectList()
+                .bodyToMono(JsonNode.class)
+                .timeout(Duration.ofSeconds(10))
                 .block();
-            
-            if (hotels != null && !hotels.isEmpty()) {
-                indexHotels(hotels);
-                log.info("Synchronized {} hotels from hotel service", hotels.size());
-            }
+
+            List<HotelDocument> hotels = parseExportPayload(exportPayload);
+            reconcileHotels(hotels);
+            log.info("Reconciled {} hotels from hotel service", hotels.size());
             
         } catch (Exception e) {
             log.error("Failed to sync hotels from hotel service", e);
         }
+    }
+
+    void reconcileHotels(List<HotelDocument> hotels) throws Exception {
+        Index index = meilisearchClient.index(HOTEL_INDEX);
+        Set<String> existingHotelIds = fetchExistingHotelIds(index);
+
+        if (!hotels.isEmpty()) {
+            indexHotels(hotels);
+        }
+
+        Set<String> exportedHotelIds = hotels.stream()
+                .map(HotelDocument::getId)
+                .filter(Objects::nonNull)
+                .map(UUID::toString)
+                .collect(Collectors.toSet());
+        existingHotelIds.removeAll(exportedHotelIds);
+
+        if (!existingHotelIds.isEmpty()) {
+            List<String> staleHotelIds = new ArrayList<>(existingHotelIds);
+            waitForSuccessfulTask(index, index.deleteDocuments(staleHotelIds));
+            log.info("Deleted {} stale hotels from the search index", staleHotelIds.size());
+        }
+    }
+
+    private Set<String> fetchExistingHotelIds(Index index) throws Exception {
+        final int pageSize = 1000;
+        int offset = 0;
+        Set<String> hotelIds = new HashSet<>();
+
+        while (true) {
+            DocumentsQuery query = new DocumentsQuery()
+                    .setOffset(offset)
+                    .setLimit(pageSize)
+                    .setFields(new String[]{"id"});
+            Results<HotelDocument> page = index.getDocuments(query, HotelDocument.class);
+            HotelDocument[] documents = page.getResults();
+
+            if (documents == null || documents.length == 0) {
+                break;
+            }
+
+            Arrays.stream(documents)
+                    .map(HotelDocument::getId)
+                    .filter(Objects::nonNull)
+                    .map(UUID::toString)
+                    .forEach(hotelIds::add);
+            offset += documents.length;
+
+            if (offset >= page.getTotal()) {
+                break;
+            }
+        }
+
+        return hotelIds;
+    }
+
+    private void waitForSuccessfulTask(Index index, TaskInfo taskInfo) throws Exception {
+        int taskUid = taskInfo.getTaskUid();
+        index.waitForTask(taskUid);
+        Task task = index.getTask(taskUid);
+        if (task.getStatus() != TaskStatus.SUCCEEDED) {
+            throw new IllegalStateException(
+                    "Meilisearch task " + taskUid + " failed: " + task.getError());
+        }
+    }
+
+    private String generateInternalToken() {
+        try {
+            long currentMinute = Instant.now().getEpochSecond() / 60;
+            String payload = serviceName + ":" + serviceSecret + ":" + currentMinute;
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(payload.getBytes(StandardCharsets.UTF_8));
+            return Base64.getEncoder().encodeToString(digest).substring(0, 32);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is unavailable", e);
+        }
+    }
+
+    private List<HotelDocument> parseExportPayload(JsonNode exportPayload) {
+        if (exportPayload == null) {
+            throw new IllegalArgumentException("Hotel export returned an empty response");
+        }
+
+        JsonNode hotelsNode;
+        if (exportPayload.isArray()) {
+            hotelsNode = exportPayload;
+        } else if (exportPayload.isObject() && exportPayload.path("content").isArray()) {
+            hotelsNode = exportPayload.path("content");
+        } else {
+            throw new IllegalArgumentException("Hotel export must be a JSON array or a page with content");
+        }
+
+        List<HotelDocument> hotels = new ArrayList<>();
+        hotelsNode.forEach(node -> hotels.add(
+                normalizeProjection(objectMapper.convertValue(node, HotelDocument.class))));
+        return hotels;
+    }
+
+    private HotelDocument normalizeProjection(HotelDocument hotel) {
+        if (hotel.getIsActive() == null) {
+            hotel.setIsActive(true);
+        }
+
+        List<HotelDocument.RoomTypeProjection> roomTypes = hotel.getRoomTypes();
+        if (roomTypes == null || roomTypes.isEmpty()) {
+            return hotel;
+        }
+
+        if (hotel.getTotalRooms() == null) {
+            hotel.setTotalRooms(roomTypes.stream()
+                    .map(HotelDocument.RoomTypeProjection::getTotalInventory)
+                    .filter(Objects::nonNull)
+                    .mapToInt(Integer::intValue)
+                    .sum());
+        }
+        if (hotel.getAvailableRooms() == null
+                && roomTypes.stream().allMatch(roomType -> roomType.getAvailableRooms() != null)) {
+            hotel.setAvailableRooms(roomTypes.stream()
+                    .map(HotelDocument.RoomTypeProjection::getAvailableRooms)
+                    .mapToInt(Integer::intValue)
+                    .sum());
+        }
+
+        List<BigDecimal> prices = roomTypes.stream()
+                .map(HotelDocument.RoomTypeProjection::getPricePerNight)
+                .filter(Objects::nonNull)
+                .toList();
+        if (hotel.getMinPrice() == null) {
+            prices.stream().min(BigDecimal::compareTo).ifPresent(hotel::setMinPrice);
+        }
+        if (hotel.getMaxPrice() == null) {
+            prices.stream().max(BigDecimal::compareTo).ifPresent(hotel::setMaxPrice);
+        }
+
+        return hotel;
     }
     
     private void initializeSampleData(Index index) {
@@ -408,25 +565,25 @@ public class IndexService {
         );
     }
     
-    /**
-     * Check if index settings need to be updated.
-     * For now, we'll assume settings are up to date if index exists.
-     * In production, you might want to compare current settings with expected settings.
-     */
     private boolean shouldUpdateSettings(Index index) {
         try {
-            // For simplicity, we'll only update settings for new indexes
-            // In production, you could compare current settings with expected settings
-            return false;
+            return !Arrays.asList(index.getDisplayedAttributesSettings()).contains("roomTypes");
         } catch (Exception e) {
             log.warn("Failed to check index settings, will update settings", e);
             return true;
         }
     }
-
     private void waitForTask(TaskInfo taskInfo) throws Exception {
-        if (taskInfo != null) {
-            meilisearchClient.waitForTask(taskInfo.getTaskUid());
+        if (taskInfo == null) {
+            throw new IllegalStateException("Meilisearch did not return a task");
+        }
+
+        int taskUid = taskInfo.getTaskUid();
+        meilisearchClient.waitForTask(taskUid);
+        Task task = meilisearchClient.getTask(taskUid);
+        if (task.getStatus() != TaskStatus.SUCCEEDED) {
+            throw new IllegalStateException(
+                    "Meilisearch task " + taskUid + " failed: " + task.getError());
         }
     }
 }

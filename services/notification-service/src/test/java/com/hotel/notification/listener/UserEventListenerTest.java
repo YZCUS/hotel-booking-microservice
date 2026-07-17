@@ -5,13 +5,15 @@ import com.hotel.notification.service.NotificationService;
 import com.hotel.notification.service.NotificationService.UserRegisteredEvent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.amqp.AmqpRejectAndDontRequeueException;
 
 import java.util.UUID;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
-import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Mockito.*;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 class UserEventListenerTest {
 
@@ -36,24 +38,31 @@ class UserEventListenerTest {
     @Test
     void handleUserRegistered_RethrowsTransientServiceFailuresForRetry() {
         UserRegisteredEvent event = userRegisteredEvent();
-        ServiceCommunicationException failure = new ServiceCommunicationException("user-service unavailable");
+        ServiceCommunicationException failure =
+                new ServiceCommunicationException("user-service unavailable");
         doThrow(failure).when(notificationService).sendWelcomeMessage(event);
 
-        ServiceCommunicationException thrown = assertThrows(ServiceCommunicationException.class,
-                () -> listener.handleUserRegistered(event));
-
-        assertSame(failure, thrown);
+        assertThatThrownBy(() -> listener.handleUserRegistered(event)).isSameAs(failure);
     }
 
     @Test
-    void handleUserRegistered_DiscardsInvalidEventDataWithoutRetry() {
+    void handleUserRegistered_RethrowsEmailFailureForBrokerRetry() {
         UserRegisteredEvent event = userRegisteredEvent();
-        doThrow(new IllegalArgumentException("missing email"))
-                .when(notificationService).sendWelcomeMessage(event);
+        RuntimeException failure = new RuntimeException("smtp unavailable");
+        doThrow(failure).when(notificationService).sendWelcomeMessage(event);
 
-        assertDoesNotThrow(() -> listener.handleUserRegistered(event));
+        assertThatThrownBy(() -> listener.handleUserRegistered(event)).isSameAs(failure);
+    }
 
-        verify(notificationService).sendWelcomeMessage(event);
+    @Test
+    void handleUserRegistered_RejectsInvalidPayloadToDeadLetterQueue() {
+        UserRegisteredEvent event = new UserRegisteredEvent();
+        event.setUserId(UUID.randomUUID());
+
+        assertThatThrownBy(() -> listener.handleUserRegistered(event))
+                .isInstanceOf(AmqpRejectAndDontRequeueException.class)
+                .hasRootCauseInstanceOf(IllegalArgumentException.class);
+        verifyNoInteractions(notificationService);
     }
 
     private UserRegisteredEvent userRegisteredEvent() {

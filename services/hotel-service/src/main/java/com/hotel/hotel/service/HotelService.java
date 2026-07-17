@@ -2,10 +2,15 @@ package com.hotel.hotel.service;
 
 import com.hotel.hotel.dto.HotelRequest;
 import com.hotel.hotel.dto.HotelResponse;
+import com.hotel.hotel.dto.HotelExportResponse;
 import com.hotel.hotel.dto.RoomTypeResponse;
 import com.hotel.hotel.dto.SearchCriteria;
 import com.hotel.hotel.entity.Hotel;
 import com.hotel.hotel.entity.RoomType;
+import com.hotel.hotel.event.EventPublisher;
+import com.hotel.hotel.event.HotelCreatedEvent;
+import com.hotel.hotel.event.HotelDeletedEvent;
+import com.hotel.hotel.event.HotelUpdatedEvent;
 import com.hotel.hotel.exception.HotelNotFoundException;
 import com.hotel.hotel.exception.RoomTypeNotFoundException;
 import com.hotel.hotel.repository.HotelRepository;
@@ -14,17 +19,14 @@ import com.hotel.hotel.repository.UserFavoriteRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.CacheEvict;
-import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.*;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Service
@@ -32,19 +34,13 @@ import java.util.stream.Collectors;
 @Slf4j
 @Transactional
 public class HotelService {
-    
+
     private final HotelRepository hotelRepository;
     private final UserFavoriteRepository favoriteRepository;
-    private final RedisTemplate<String, Object> redisTemplate;
     private final RoomService roomService;
     private final RoomTypeRepository roomTypeRepository;
-    
-    private static final String HOTEL_CACHE_KEY = "hotel:";
-    private static final String SEARCH_CACHE_KEY = "search:";
-    private static final String SEARCH_CACHE_VERSION_KEY = "search:version";
-    private static final int CACHE_TTL_MINUTES = 10;
-    
-    @Cacheable(value = "hotels", key = "#hotelId")
+    private final EventPublisher eventPublisher;
+
     public HotelResponse getHotelById(UUID hotelId) {
         log.info("Getting hotel by id: {}", hotelId);
         
@@ -53,7 +49,7 @@ public class HotelService {
         
         return mapToResponse(hotel, null);
     }
-    
+
     public HotelResponse getHotelById(UUID hotelId, UUID userId) {
         log.info("Getting hotel by id: {} for user: {}", hotelId, userId);
         
@@ -86,44 +82,12 @@ public class HotelService {
     
     public Page<HotelResponse> searchHotels(SearchCriteria criteria, Pageable pageable, UUID userId) {
         log.info("Searching hotels with criteria: {}", criteria);
-        
-        String cacheKey = SEARCH_CACHE_KEY + getSearchCacheVersion() + ":" + criteria.hashCode() + ":" + pageable.hashCode();
-        
-        // Check cache with safe type checking
-        if (userId == null) { // Only use cache for anonymous users
-            try {
-                Object cachedObject = redisTemplate.opsForValue().get(cacheKey);
-                if (cachedObject instanceof Page<?>) {
-                    @SuppressWarnings("unchecked")
-                    Page<HotelResponse> cached = (Page<HotelResponse>) cachedObject;
-                    log.debug("Found cached search results");
-                    return cached;
-                }
-            } catch (Exception e) {
-                log.warn("Failed to retrieve from cache, proceeding with database query: {}", e.getMessage());
-                // Remove corrupted cache entry
-                redisTemplate.delete(cacheKey);
-            }
-        }
-        
+
         // Build dynamic query specification
         Specification<Hotel> spec = buildSearchSpecification(criteria);
         
         Page<Hotel> hotels = hotelRepository.findAll(spec, pageable);
-        Page<HotelResponse> response = mapSearchResults(hotels, userId);
-        
-        // Cache results for anonymous users only (10 minutes) with error handling
-        if (userId == null) {
-            try {
-                redisTemplate.opsForValue().set(cacheKey, response, CACHE_TTL_MINUTES, TimeUnit.MINUTES);
-                log.debug("Cached search results for key: {}", cacheKey);
-            } catch (Exception e) {
-                log.warn("Failed to cache search results: {}", e.getMessage());
-                // Continue execution even if caching fails
-            }
-        }
-        
-        return response;
+        return mapSearchResults(hotels, userId);
     }
     
     public HotelResponse createHotel(HotelRequest request) {
@@ -143,8 +107,7 @@ public class HotelService {
         
         Hotel saved = hotelRepository.save(hotel);
         
-        // Clear search cache
-        clearSearchCache();
+        eventPublisher.publishHotelCreated(toHotelCreatedEvent(saved));
         
         return mapToResponse(saved, null);
     }
@@ -168,7 +131,7 @@ public class HotelService {
         
         Hotel updated = hotelRepository.save(hotel);
         
-        clearSearchCache();
+        eventPublisher.publishHotelUpdated(toHotelUpdatedEvent(updated));
         
         return mapToResponse(updated, null);
     }
@@ -179,9 +142,18 @@ public class HotelService {
         
         Hotel hotel = hotelRepository.findById(hotelId)
                 .orElseThrow(() -> new HotelNotFoundException("Hotel not found"));
-        
+
+        Map<UUID, Integer> inventoryCapacities = roomTypeRepository.findByHotelId(hotelId).stream()
+                .collect(Collectors.toMap(
+                        RoomType::getId,
+                        RoomType::getTotalInventory,
+                        (first, ignored) -> first,
+                        LinkedHashMap::new));
         hotelRepository.delete(hotel);
-        clearSearchCache();
+        hotelRepository.flush();
+        eventPublisher.publishHotelDeleted(
+                HotelDeletedEvent.builder().hotelId(hotel.getId()).build());
+        roomService.deleteInventories(inventoryCapacities);
     }
     
     public List<String> getAllCities() {
@@ -190,6 +162,13 @@ public class HotelService {
     
     public List<String> getAllCountries() {
         return hotelRepository.findAllCountries();
+    }
+
+    @Transactional(readOnly = true)
+    public List<HotelExportResponse> exportHotels() {
+        return hotelRepository.findAll().stream()
+                .map(this::mapToExportResponse)
+                .toList();
     }
     
     private Specification<Hotel> buildSearchSpecification(SearchCriteria criteria) {
@@ -237,8 +216,7 @@ public class HotelService {
         List<UUID> hotelIds = hotelList.stream()
                 .map(Hotel::getId)
                 .filter(Objects::nonNull)
-                .collect(Collectors.toList());
-
+                .toList();
         List<RoomType> pageRoomTypes = roomTypeRepository.findByHotelIdIn(hotelIds);
         if (pageRoomTypes == null) {
             pageRoomTypes = List.of();
@@ -247,12 +225,10 @@ public class HotelService {
         Map<UUID, List<RoomType>> roomTypesByHotelId = pageRoomTypes.stream()
                 .filter(roomType -> roomType.getHotel() != null && roomType.getHotel().getId() != null)
                 .collect(Collectors.groupingBy(roomType -> roomType.getHotel().getId()));
-
         List<UUID> roomTypeIds = pageRoomTypes.stream()
                 .map(RoomType::getId)
                 .filter(Objects::nonNull)
-                .collect(Collectors.toList());
-
+                .toList();
         Map<UUID, Integer> availabilityMap = roomTypeIds.isEmpty()
                 ? Map.of()
                 : roomService.getRoomAvailabilities(roomTypeIds);
@@ -270,10 +246,6 @@ public class HotelService {
     }
 
     private Map<UUID, Long> getFavoriteCounts(List<UUID> hotelIds) {
-        if (hotelIds.isEmpty()) {
-            return Map.of();
-        }
-
         List<Object[]> rows = favoriteRepository.countFavoritesByHotelIds(hotelIds);
         if (rows == null || rows.isEmpty()) {
             return Map.of();
@@ -289,15 +261,12 @@ public class HotelService {
     }
 
     private Set<UUID> getFavoriteHotelIds(UUID userId, List<UUID> hotelIds) {
-        if (userId == null || hotelIds.isEmpty()) {
+        if (userId == null) {
             return Set.of();
         }
 
         List<UUID> favoriteHotelIds = favoriteRepository.findFavoriteHotelIdsByUserIdAndHotelIdIn(userId, hotelIds);
-        if (favoriteHotelIds == null || favoriteHotelIds.isEmpty()) {
-            return Set.of();
-        }
-        return new HashSet<>(favoriteHotelIds);
+        return favoriteHotelIds == null ? Set.of() : new HashSet<>(favoriteHotelIds);
     }
 
     private HotelResponse mapToResponse(Hotel hotel, UUID userId) {
@@ -305,16 +274,14 @@ public class HotelService {
         List<UUID> roomTypeIds = hotelRoomTypes.stream()
                 .map(RoomType::getId)
                 .filter(Objects::nonNull)
-                .collect(Collectors.toList());
+                .toList();
         Map<UUID, Integer> availabilityMap = roomService.getRoomAvailabilities(roomTypeIds);
-        
         Boolean isFavorite = null;
         if (userId != null) {
             isFavorite = favoriteRepository.existsByUserIdAndHotelId(userId, hotel.getId());
         }
-        
         Long favoriteCount = favoriteRepository.countFavoritesByHotelId(hotel.getId());
-        
+
         return mapToResponse(hotel, hotelRoomTypes, availabilityMap, favoriteCount, isFavorite);
     }
 
@@ -324,18 +291,15 @@ public class HotelService {
             Map<UUID, Integer> availabilityMap,
             Long favoriteCount,
             Boolean isFavorite) {
-        List<RoomType> safeRoomTypes = hotelRoomTypes == null ? List.of() : hotelRoomTypes;
-
-        List<RoomTypeResponse> roomTypes = safeRoomTypes.stream()
-                .map(roomType -> roomService.mapToResponse(roomType, availabilityMap.getOrDefault(roomType.getId(), 0)))
-                .collect(Collectors.toList());
-
-        BigDecimal minPrice = safeRoomTypes.stream()
+        List<RoomTypeResponse> roomTypes = hotelRoomTypes.stream()
+                .map(roomType -> roomService.mapToResponse(roomType, availabilityMap.get(roomType.getId())))
+                .toList();
+        BigDecimal minPrice = hotelRoomTypes.stream()
                 .map(RoomType::getPricePerNight)
                 .filter(Objects::nonNull)
                 .min(BigDecimal::compareTo)
                 .orElse(null);
-        BigDecimal maxPrice = safeRoomTypes.stream()
+        BigDecimal maxPrice = hotelRoomTypes.stream()
                 .map(RoomType::getPricePerNight)
                 .filter(Objects::nonNull)
                 .max(BigDecimal::compareTo)
@@ -376,28 +340,74 @@ public class HotelService {
                 .isAvailable(roomType.getTotalInventory() > 0)
                 .build();
     }
-    
-    private void clearSearchCache() {
-        try {
-            Long version = redisTemplate.opsForValue().increment(SEARCH_CACHE_VERSION_KEY);
-            log.info("Invalidated search cache namespace; version is now {}", version);
-        } catch (Exception e) {
-            log.error("Error clearing search cache", e);
-        }
+
+    private HotelExportResponse mapToExportResponse(Hotel hotel) {
+        HotelResponse response = mapToResponse(hotel, null);
+        List<RoomTypeResponse> rooms = response.getRoomTypes();
+        int totalRooms = rooms.stream()
+                .mapToInt(room -> room.getTotalInventory() == null ? 0 : room.getTotalInventory())
+                .sum();
+        Integer availableRooms = rooms.stream().anyMatch(room -> room.getAvailableRooms() == null)
+                ? null
+                : rooms.stream().mapToInt(RoomTypeResponse::getAvailableRooms).sum();
+
+        return HotelExportResponse.builder()
+                .id(response.getId())
+                .name(response.getName())
+                .description(response.getDescription())
+                .city(response.getCity())
+                .country(response.getCountry())
+                .address(response.getAddress())
+                .starRating(response.getStarRating())
+                .minPrice(response.getMinPrice())
+                .maxPrice(response.getMaxPrice())
+                .amenities(response.getAmenities())
+                .latitude(toDouble(response.getLatitude()))
+                .longitude(toDouble(response.getLongitude()))
+                .imageUrls(List.of())
+                .totalRooms(totalRooms)
+                .availableRooms(availableRooms)
+                .averageRating(null)
+                .reviewCount(null)
+                .isActive(true)
+                .roomTypes(rooms)
+                .build();
     }
 
-    private long getSearchCacheVersion() {
-        try {
-            Object version = redisTemplate.opsForValue().get(SEARCH_CACHE_VERSION_KEY);
-            if (version instanceof Number number) {
-                return number.longValue();
-            }
-            if (version instanceof String value) {
-                return Long.parseLong(value);
-            }
-        } catch (Exception e) {
-            log.warn("Failed to read search cache version, using default namespace: {}", e.getMessage());
-        }
-        return 0L;
+    private HotelCreatedEvent toHotelCreatedEvent(Hotel hotel) {
+        return HotelCreatedEvent.builder()
+                .hotelId(hotel.getId())
+                .name(hotel.getName())
+                .description(hotel.getDescription())
+                .city(hotel.getCity())
+                .country(hotel.getCountry())
+                .address(hotel.getAddress())
+                .starRating(hotel.getStarRating())
+                .amenities(hotel.getAmenities())
+                .latitude(toDouble(hotel.getLatitude()))
+                .longitude(toDouble(hotel.getLongitude()))
+                .imageUrls(List.of())
+                .build();
+    }
+
+    private HotelUpdatedEvent toHotelUpdatedEvent(Hotel hotel) {
+        return HotelUpdatedEvent.builder()
+                .hotelId(hotel.getId())
+                .name(hotel.getName())
+                .description(hotel.getDescription())
+                .city(hotel.getCity())
+                .country(hotel.getCountry())
+                .address(hotel.getAddress())
+                .starRating(hotel.getStarRating())
+                .amenities(hotel.getAmenities())
+                .latitude(toDouble(hotel.getLatitude()))
+                .longitude(toDouble(hotel.getLongitude()))
+                .imageUrls(List.of())
+                .isActive(true)
+                .build();
+    }
+
+    private Double toDouble(BigDecimal value) {
+        return value == null ? null : value.doubleValue();
     }
 }

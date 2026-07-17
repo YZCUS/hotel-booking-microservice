@@ -1,5 +1,6 @@
 package com.hotel.search.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -14,6 +15,7 @@ import java.util.UUID;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class HotelDocument {
     
     @JsonProperty("id")
@@ -60,6 +62,9 @@ public class HotelDocument {
     
     @JsonProperty("availableRooms")
     private Integer availableRooms;
+
+    @JsonProperty("roomTypes")
+    private List<RoomTypeProjection> roomTypes;
     
     @JsonProperty("averageRating")
     private Double averageRating;
@@ -69,4 +74,19 @@ public class HotelDocument {
     
     @JsonProperty("isActive")
     private Boolean isActive;
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class RoomTypeProjection {
+        private UUID id;
+        private String name;
+        private Integer capacity;
+        private BigDecimal pricePerNight;
+        private Integer totalInventory;
+        private Integer availableRooms;
+        private Boolean isAvailable;
+    }
 }
