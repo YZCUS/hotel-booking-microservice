@@ -16,8 +16,8 @@ import com.hotel.booking.exception.InsufficientInventoryException;
 import com.hotel.booking.repository.BookingRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.retry.annotation.Backoff;
@@ -25,6 +25,7 @@ import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionOperations;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -35,7 +36,6 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-@Transactional
 public class BookingService {
     
     private final BookingRepository bookingRepository;
@@ -43,25 +43,24 @@ public class BookingService {
     private final PricingService pricingService;
     private final HotelCatalogClient hotelCatalogClient;
     private final EventPublisher eventPublisher;
+    private final TransactionOperations bookingTransactionOperations;
     
     private static final int MAX_RETRY_ATTEMPTS = 3;
     
     @Retryable(
-        value = {OptimisticLockingFailureException.class},
+        retryFor = {OptimisticLockingFailureException.class},
         maxAttempts = MAX_RETRY_ATTEMPTS,
         backoff = @Backoff(delay = 100, multiplier = 2)
     )
-    @Transactional(rollbackFor = Exception.class, isolation = Isolation.READ_COMMITTED)
     public BookingResponse createBooking(BookingRequest request) {
         return createBooking(request, null);
     }
 
     @Retryable(
-        value = {OptimisticLockingFailureException.class},
+        retryFor = {OptimisticLockingFailureException.class},
         maxAttempts = MAX_RETRY_ATTEMPTS,
         backoff = @Backoff(delay = 100, multiplier = 2)
     )
-    @Transactional(rollbackFor = Exception.class, isolation = Isolation.READ_COMMITTED)
     public BookingResponse createBooking(BookingRequest request, String idempotencyKey) {
         log.info("Creating booking for user: {} from {} to {}", 
             request.getUserId(), request.getCheckInDate(), request.getCheckOutDate());
@@ -88,10 +87,11 @@ public class BookingService {
         }
         BigDecimal totalPrice = pricingService.calculateTotalPrice(
                 roomType, request.getCheckInDate(), request.getCheckOutDate());
-        
-        // Check and reserve inventory (with optimistic locking)
+
+        // Inventory commits independently; compensate it if the short booking/outbox transaction fails.
+        boolean inventoryReserved = false;
         try {
-            boolean inventoryReserved = inventoryService.reserveInventory(
+            inventoryReserved = inventoryService.reserveInventory(
                 request.getRoomTypeId(),
                 request.getCheckInDate(),
                 request.getCheckOutDate(),
@@ -114,35 +114,53 @@ public class BookingService {
                 .idempotencyKey(normalizedIdempotencyKey)
                 .build();
             
-            Booking saved;
-            try {
-                saved = bookingRepository.saveAndFlush(booking);
-            } catch (DataIntegrityViolationException e) {
-                throw new BookingConflictException(
-                        "Idempotency-Key is already being processed", e);
-            }
-            
-            BookingCreatedEvent event = BookingCreatedEvent.builder()
-                .bookingId(saved.getId())
-                .userId(saved.getUserId())
-                .roomTypeId(saved.getRoomTypeId())
-                .checkInDate(saved.getCheckInDate())
-                .checkOutDate(saved.getCheckOutDate())
-                .guests(saved.getGuests())
-                .totalPrice(saved.getTotalPrice())
-                .createdAt(saved.getCreatedAt() != null ? saved.getCreatedAt() : LocalDateTime.now())
-                .build();
-            eventPublisher.publishBookingCreated(event);
+            Booking saved = bookingTransactionOperations.execute(status -> {
+                Booking persisted;
+                try {
+                    persisted = bookingRepository.saveAndFlush(booking);
+                } catch (DataIntegrityViolationException e) {
+                    throw new BookingConflictException(
+                            "Idempotency-Key is already being processed", e);
+                }
+
+                BookingCreatedEvent event = BookingCreatedEvent.builder()
+                    .bookingId(persisted.getId())
+                    .userId(persisted.getUserId())
+                    .roomTypeId(persisted.getRoomTypeId())
+                    .checkInDate(persisted.getCheckInDate())
+                    .checkOutDate(persisted.getCheckOutDate())
+                    .guests(persisted.getGuests())
+                    .totalPrice(persisted.getTotalPrice())
+                    .createdAt(persisted.getCreatedAt() != null
+                            ? persisted.getCreatedAt() : LocalDateTime.now())
+                    .build();
+                eventPublisher.publishBookingCreated(event);
+                return persisted;
+            });
             
             log.info("Successfully created booking: {} for user: {}", saved.getId(), request.getUserId());
             return mapToResponse(saved);
             
-        } catch (OptimisticLockingFailureException e) {
-            log.warn("Optimistic lock failure during booking creation, retrying... Attempt: {}", e.getMessage());
-            throw e;  // Let @Retryable handle retry
+        } catch (RuntimeException e) {
+            if (inventoryReserved) {
+                try {
+                    inventoryService.releaseInventory(
+                            request.getRoomTypeId(), request.getCheckInDate(),
+                            request.getCheckOutDate(), 1);
+                    log.info("Released inventory after booking transaction failure");
+                } catch (RuntimeException releaseException) {
+                    log.error("Failed to release inventory after booking transaction failure",
+                            releaseException);
+                }
+            }
+            if (e instanceof OptimisticLockingFailureException) {
+                log.warn("Optimistic lock failure during booking creation; retrying", e);
+            }
+            throw e;
         }
     }
     
+    @Transactional(readOnly = true)
     public BookingResponse getBooking(UUID bookingId, UUID userId) {
         log.info("Getting booking: {} for user: {}", bookingId, userId);
         
@@ -153,7 +171,7 @@ public class BookingService {
     }
     
     @Retryable(
-        value = {OptimisticLockingFailureException.class},
+        retryFor = {OptimisticLockingFailureException.class},
         maxAttempts = MAX_RETRY_ATTEMPTS,
         backoff = @Backoff(delay = 100, multiplier = 2)
     )
@@ -212,10 +230,16 @@ public class BookingService {
         }
     }
     
+    @Retryable(
+        retryFor = {OptimisticLockingFailureException.class},
+        maxAttempts = MAX_RETRY_ATTEMPTS,
+        backoff = @Backoff(delay = 100, multiplier = 2)
+    )
+    @Transactional(rollbackFor = Exception.class, isolation = Isolation.READ_COMMITTED)
     public BookingResponse checkIn(UUID bookingId, CheckInRequest request) {
         log.info("Checking in booking: {} to room: {}", bookingId, request.getRoomNumber());
         
-        Booking booking = bookingRepository.findById(bookingId)
+        Booking booking = bookingRepository.findByIdForUpdate(bookingId)
             .orElseThrow(() -> new BookingNotFoundException("Booking not found"));
         
         if (booking.getStatus() != BookingStatus.CONFIRMED) {
@@ -249,10 +273,16 @@ public class BookingService {
         return mapToResponse(updated);
     }
     
+    @Retryable(
+        retryFor = {OptimisticLockingFailureException.class},
+        maxAttempts = MAX_RETRY_ATTEMPTS,
+        backoff = @Backoff(delay = 100, multiplier = 2)
+    )
+    @Transactional(rollbackFor = Exception.class, isolation = Isolation.READ_COMMITTED)
     public BookingResponse checkOut(UUID bookingId) {
         log.info("Checking out booking: {}", bookingId);
         
-        Booking booking = bookingRepository.findById(bookingId)
+        Booking booking = bookingRepository.findByIdForUpdate(bookingId)
             .orElseThrow(() -> new BookingNotFoundException("Booking not found"));
         
         if (booking.getStatus() != BookingStatus.CHECKED_IN) {
@@ -272,6 +302,7 @@ public class BookingService {
         return mapToResponse(updated);
     }
     
+    @Transactional(readOnly = true)
     public Page<BookingResponse> getUserBookings(UUID userId, Pageable pageable) {
         log.info("Getting bookings for user: {}", userId);
         
@@ -279,6 +310,7 @@ public class BookingService {
         return bookings.map(this::mapToResponse);
     }
     
+    @Transactional(readOnly = true)
     public void validateBookingOwnership(UUID bookingId, UUID userId) {
         log.debug("Validating ownership of booking {} for user {}", bookingId, userId);
         

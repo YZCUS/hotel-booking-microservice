@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -26,6 +27,14 @@ public interface UserFavoriteRepository extends JpaRepository<UserFavorite, User
     
     @Query("SELECT COUNT(uf) FROM UserFavorite uf WHERE uf.hotelId = :hotelId")
     Long countFavoritesByHotelId(@Param("hotelId") UUID hotelId);
+
+    @Query("SELECT uf.hotelId, COUNT(uf) FROM UserFavorite uf WHERE uf.hotelId IN :hotelIds GROUP BY uf.hotelId")
+    List<Object[]> countFavoritesByHotelIds(@Param("hotelIds") Collection<UUID> hotelIds);
+
+    @Query("SELECT uf.hotelId FROM UserFavorite uf WHERE uf.userId = :userId AND uf.hotelId IN :hotelIds")
+    List<UUID> findFavoriteHotelIdsByUserIdAndHotelIdIn(
+            @Param("userId") UUID userId,
+            @Param("hotelIds") Collection<UUID> hotelIds);
     
     @Query("SELECT COUNT(uf) FROM UserFavorite uf WHERE uf.userId = :userId")
     Long countFavoritesByUserId(@Param("userId") UUID userId);

@@ -8,6 +8,7 @@ import com.hotel.booking.repository.RoomInventoryRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -79,7 +80,7 @@ class InventoryServiceTest {
                 .thenReturn(List.of(inventory1, inventory2));
         when(inventoryRepository.save(any(RoomInventory.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
-        when(cacheManager.getCache("room-availability")).thenReturn(availabilityCache);
+        stubAvailabilityCache();
 
         // When
         boolean result = inventoryService.reserveInventory(roomTypeId, checkIn, checkOut, 2);
@@ -130,7 +131,7 @@ class InventoryServiceTest {
     }
 
     @Test
-    void reserveInventory_InventoryNotFound() {
+    void reserveInventory_NoInventoryReturnsFalse() {
         // Given
         when(inventoryRepository.findByRoomTypeIdAndDateRangeForUpdate(roomTypeId, checkIn, checkOut.minusDays(1)))
                 .thenReturn(List.of());
@@ -140,6 +141,7 @@ class InventoryServiceTest {
 
         // Then
         assertFalse(result);
+        verify(inventoryRepository, never()).save(any());
     }
 
     @Test
@@ -162,13 +164,13 @@ class InventoryServiceTest {
                 .thenReturn(List.of(inventory1, inventory2));
         when(inventoryRepository.saveAll(anyList()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
-        when(cacheManager.getCache("room-availability")).thenReturn(availabilityCache);
+        stubAvailabilityCache();
 
         // When
         inventoryService.releaseInventory(roomTypeId, checkIn, checkOut, 2);
 
         // Then
-        verify(inventoryRepository).saveAll(anyList());
+        verify(inventoryRepository).saveAll(List.of(inventory1, inventory2));
         verify(availabilityCache).clear();
         assertEquals(7, inventory1.getAvailableRooms());
         assertEquals(7, inventory2.getAvailableRooms());
@@ -279,9 +281,10 @@ class InventoryServiceTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
     void initializeInventory_Success() {
         // Given
-        when(inventoryRepository.findByRoomTypeIdAndDateBetween(any(), any(), any()))
+        when(inventoryRepository.findByRoomTypeIdAndDateBetween(eq(roomTypeId), any(), any()))
                 .thenReturn(List.of());
         when(inventoryRepository.saveAll(anyList()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
@@ -290,13 +293,11 @@ class InventoryServiceTest {
         inventoryService.initializeInventory(roomTypeId, 10, 7);
 
         // Then
-        verify(inventoryRepository).saveAll(argThat(inventories -> {
-            int count = 0;
-            for (RoomInventory ignored : inventories) {
-                count++;
-            }
-            return count == 396; // full 365-day booking horizon plus max stay
-        }));
+        ArgumentCaptor<List<RoomInventory>> captor = ArgumentCaptor.forClass(List.class);
+        verify(inventoryRepository).saveAll(captor.capture());
+        assertEquals(396, captor.getValue().size());
+        assertTrue(captor.getValue().stream().allMatch(inventory ->
+                inventory.getTotalRooms() == 10 && inventory.getAvailableRooms() == 10));
     }
 
     @Test
@@ -311,7 +312,7 @@ class InventoryServiceTest {
                         .availableRooms(10)
                         .build())
                 .toList();
-        when(inventoryRepository.findByRoomTypeIdAndDateBetween(any(), any(), any()))
+        when(inventoryRepository.findByRoomTypeIdAndDateBetween(eq(roomTypeId), any(), any()))
                 .thenReturn(completeHorizon);
 
         // When
@@ -326,5 +327,9 @@ class InventoryServiceTest {
         assertThrows(IllegalArgumentException.class,
                 () -> inventoryService.checkAvailability(roomTypeId, checkOut, checkIn, 1));
         verifyNoInteractions(inventoryRepository);
+    }
+
+    private void stubAvailabilityCache() {
+        when(cacheManager.getCache("room-availability")).thenReturn(availabilityCache);
     }
 }

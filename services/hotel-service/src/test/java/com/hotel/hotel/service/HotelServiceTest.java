@@ -32,6 +32,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -177,6 +178,77 @@ class HotelServiceTest {
         
         verify(hotelRepository).findAll(any(Specification.class), any(Pageable.class));
         verify(valueOperations, never()).set(anyString(), any(), any(Long.class), any(TimeUnit.class));
+    }
+
+    @Test
+    void testSearchHotels_BatchesAvailabilityAndFavoriteLookupsForPage() {
+        SearchCriteria criteria = SearchCriteria.builder().city("Test City").build();
+        Pageable pageable = PageRequest.of(0, 20);
+        UUID secondHotelId = UUID.randomUUID();
+        UUID firstRoomTypeId = UUID.randomUUID();
+        UUID secondRoomTypeId = UUID.randomUUID();
+        RoomType firstRoom = roomType(firstRoomTypeId, testHotel, "Deluxe");
+        testHotel.setRoomTypes(List.of(firstRoom));
+        Hotel secondHotel = Hotel.builder()
+                .id(secondHotelId)
+                .name("Second Hotel")
+                .city("Test City")
+                .country("Test Country")
+                .roomTypes(List.of())
+                .createdAt(LocalDateTime.now())
+                .build();
+        RoomType secondRoom = roomType(secondRoomTypeId, secondHotel, "Standard");
+        secondHotel.setRoomTypes(List.of(secondRoom));
+
+        when(hotelRepository.findAll(any(Specification.class), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(testHotel, secondHotel)));
+        when(roomTypeRepository.findByHotelIdIn(any())).thenReturn(List.of(firstRoom, secondRoom));
+        when(roomService.getRoomAvailabilities(any())).thenReturn(Map.of(
+                firstRoomTypeId, 4,
+                secondRoomTypeId, 7));
+        when(roomService.mapToResponse(firstRoom, 4))
+                .thenReturn(RoomTypeResponse.builder().id(firstRoomTypeId).availableRooms(4).build());
+        when(roomService.mapToResponse(secondRoom, 7))
+                .thenReturn(RoomTypeResponse.builder().id(secondRoomTypeId).availableRooms(7).build());
+        when(favoriteRepository.countFavoritesByHotelIds(any()))
+                .thenReturn(List.of(new Object[]{testHotelId, 2L}, new Object[]{secondHotelId, 1L}));
+
+        Page<HotelResponse> result = hotelService.searchHotels(criteria, pageable);
+
+        assertEquals(2, result.getContent().size());
+        assertEquals(4, result.getContent().get(0).getRoomTypes().getFirst().getAvailableRooms());
+        assertEquals(7, result.getContent().get(1).getRoomTypes().getFirst().getAvailableRooms());
+        assertEquals(2L, result.getContent().get(0).getFavoriteCount());
+        assertEquals(1L, result.getContent().get(1).getFavoriteCount());
+        verify(roomService).getRoomAvailabilities(argThat(ids ->
+                ids.size() == 2 && ids.contains(firstRoomTypeId) && ids.contains(secondRoomTypeId)));
+        verify(favoriteRepository).countFavoritesByHotelIds(argThat(ids ->
+                ids.size() == 2 && ids.contains(testHotelId) && ids.contains(secondHotelId)));
+        verify(favoriteRepository, never()).countFavoritesByHotelId(any());
+    }
+
+    @Test
+    void testSearchHotels_InventoryOutagePreservesUnknownAvailability() {
+        SearchCriteria criteria = SearchCriteria.builder().city("Test City").build();
+        UUID roomTypeId = UUID.randomUUID();
+        RoomType roomType = roomType(roomTypeId, testHotel, "Deluxe");
+        testHotel.setRoomTypes(List.of(roomType));
+        RoomTypeResponse unknownAvailability = RoomTypeResponse.builder()
+                .id(roomTypeId)
+                .availableRooms(null)
+                .isAvailable(null)
+                .build();
+
+        when(hotelRepository.findAll(any(Specification.class), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(testHotel)));
+        when(roomTypeRepository.findByHotelIdIn(any())).thenReturn(List.of(roomType));
+        when(roomService.getRoomAvailabilities(List.of(roomTypeId))).thenReturn(Map.of());
+        when(roomService.mapToResponse(roomType, null)).thenReturn(unknownAvailability);
+
+        Page<HotelResponse> result = hotelService.searchHotels(criteria, PageRequest.of(0, 20));
+
+        assertNull(result.getContent().getFirst().getRoomTypes().getFirst().getAvailableRooms());
+        verify(roomService).mapToResponse(roomType, null);
     }
     
     @Test
@@ -405,5 +477,18 @@ class HotelServiceTest {
         assertEquals(3, result.size());
         assertEquals(countries, result);
         verify(hotelRepository).findAllCountries();
+    }
+
+    private RoomType roomType(UUID id, Hotel hotel, String name) {
+        return RoomType.builder()
+                .id(id)
+                .hotel(hotel)
+                .name(name)
+                .description(name + " room")
+                .capacity(2)
+                .pricePerNight(BigDecimal.valueOf(100))
+                .totalInventory(10)
+                .createdAt(LocalDateTime.now())
+                .build();
     }
 }

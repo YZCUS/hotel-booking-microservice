@@ -10,7 +10,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
+import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
@@ -40,7 +42,11 @@ public class InventoryService {
     private final CacheManager cacheManager;
     
     @Retryable(
-        value = {OptimisticLockingFailureException.class},
+        retryFor = {
+            OptimisticLockingFailureException.class,
+            PessimisticLockingFailureException.class,
+            CannotAcquireLockException.class
+        },
         maxAttempts = 3,
         backoff = @Backoff(delay = 100, multiplier = 2)
     )
@@ -97,7 +103,11 @@ public class InventoryService {
     }
     
     @Retryable(
-        value = {OptimisticLockingFailureException.class},
+        retryFor = {
+            OptimisticLockingFailureException.class,
+            PessimisticLockingFailureException.class,
+            CannotAcquireLockException.class
+        },
         maxAttempts = 3,
         backoff = @Backoff(delay = 100, multiplier = 2)
     )

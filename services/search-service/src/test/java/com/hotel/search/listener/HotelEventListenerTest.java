@@ -7,11 +7,12 @@ import org.junit.jupiter.api.Test;
 
 import java.util.UUID;
 
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 class HotelEventListenerTest {
 
@@ -25,13 +26,15 @@ class HotelEventListenerTest {
     }
 
     @Test
-    void handleHotelCreated_RethrowsIndexingFailure() {
+    void handleHotelCreated_RethrowsIndexingFailureForRabbitRetry() {
         HotelEventListener.HotelCreatedEvent event = new HotelEventListener.HotelCreatedEvent();
         event.setHotelId(UUID.randomUUID());
+        event.setName("Retry Hotel");
         RuntimeException failure = new RuntimeException("index unavailable");
         doThrow(failure).when(indexService).indexHotel(any());
 
         assertThatThrownBy(() -> listener.handleHotelCreated(event)).isSameAs(failure);
+        verify(indexService).indexHotel(any());
     }
 
     @Test

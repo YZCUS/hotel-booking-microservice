@@ -7,13 +7,13 @@ import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
+import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
-import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
@@ -31,6 +31,12 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
     
     private static final int REQUESTS_PER_MINUTE = 60;
     private static final int AUTHENTICATED_REQUESTS_PER_MINUTE = 120;
+    private static final String RATE_LIMIT_WINDOW_SECONDS = "60";
+    private static final RedisScript<Long> RATE_LIMIT_SCRIPT = RedisScript.of(
+        "local current = redis.call('incr', KEYS[1]); " +
+            "if current == 1 then redis.call('expire', KEYS[1], ARGV[1]); end; " +
+            "return current",
+        Long.class);
     private static final List<String> EXCLUDED_PATHS = List.of(
         "/actuator/",
         "/health/",
@@ -53,16 +59,9 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
         
         String key = "rate_limit:" + clientId;
         
-        return redisTemplate.opsForValue()
-            .increment(key)
-            .flatMap(count -> {
-                if (count == 1) {
-                    // First request, set expiration
-                    return redisTemplate.expire(key, Duration.ofMinutes(1))
-                        .then(Mono.just(count));
-                }
-                return Mono.just(count);
-            })
+        return redisTemplate.execute(RATE_LIMIT_SCRIPT, List.of(key), List.of(RATE_LIMIT_WINDOW_SECONDS))
+            .next()
+            .switchIfEmpty(Mono.error(new IllegalStateException("Redis rate limit script returned no result")))
             .flatMap(count -> {
                 if (count > rateLimit) {
                     log.warn("Rate limit exceeded for client: {} (requests: {}, limit: {})", 

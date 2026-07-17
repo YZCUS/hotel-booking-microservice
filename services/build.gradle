@@ -11,7 +11,10 @@ subprojects {
     
     group = 'com.hotel'
     version = '1.0.0'
-    sourceCompatibility = '21'
+    java {
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
+    }
     
     repositories {
         mavenCentral()

@@ -87,7 +87,7 @@ public class HotelService {
         Specification<Hotel> spec = buildSearchSpecification(criteria);
         
         Page<Hotel> hotels = hotelRepository.findAll(spec, pageable);
-        return hotels.map(hotel -> mapToResponse(hotel, userId));
+        return mapSearchResults(hotels, userId);
     }
     
     public HotelResponse createHotel(HotelRequest request) {
@@ -206,44 +206,105 @@ public class HotelService {
         
         return spec;
     }
-    
-    private HotelResponse mapToResponse(Hotel hotel, UUID userId) {
-        // get all room types for this hotel
-        List<UUID> roomTypeIds = hotel.getRoomTypes() != null ?
-                hotel.getRoomTypes().stream().map(RoomType::getId).collect(Collectors.toList()) :
-                List.of();
 
-        // get availability for each room type
-        Map<UUID, Integer> availabilityMap = roomService.getRoomAvailabilities(roomTypeIds);
-
-        List<RoomTypeResponse> roomTypes = hotel.getRoomTypes() != null ?
-                hotel.getRoomTypes().stream()
-                        .map(roomType -> roomService.mapToResponse(roomType, availabilityMap.get(roomType.getId())))
-                        .collect(Collectors.toList()) : Collections.emptyList();
-        
-        // Calculate price range
-        BigDecimal minPrice = null;
-        BigDecimal maxPrice = null;
-        if (hotel.getRoomTypes() != null && !hotel.getRoomTypes().isEmpty()) {
-            minPrice = hotel.getRoomTypes().stream()
-                    .map(RoomType::getPricePerNight)
-                    .min(BigDecimal::compareTo)
-                    .orElse(null);
-            maxPrice = hotel.getRoomTypes().stream()
-                    .map(RoomType::getPricePerNight)
-                    .max(BigDecimal::compareTo)
-                    .orElse(null);
+    private Page<HotelResponse> mapSearchResults(Page<Hotel> hotels, UUID userId) {
+        List<Hotel> hotelList = hotels.getContent();
+        if (hotelList.isEmpty()) {
+            return hotels.map(hotel -> mapToResponse(hotel, userId));
         }
-        
-        // Check if user has saved this hotel as favorite
+
+        List<UUID> hotelIds = hotelList.stream()
+                .map(Hotel::getId)
+                .filter(Objects::nonNull)
+                .toList();
+        List<RoomType> pageRoomTypes = roomTypeRepository.findByHotelIdIn(hotelIds);
+        if (pageRoomTypes == null) {
+            pageRoomTypes = List.of();
+        }
+
+        Map<UUID, List<RoomType>> roomTypesByHotelId = pageRoomTypes.stream()
+                .filter(roomType -> roomType.getHotel() != null && roomType.getHotel().getId() != null)
+                .collect(Collectors.groupingBy(roomType -> roomType.getHotel().getId()));
+        List<UUID> roomTypeIds = pageRoomTypes.stream()
+                .map(RoomType::getId)
+                .filter(Objects::nonNull)
+                .toList();
+        Map<UUID, Integer> availabilityMap = roomTypeIds.isEmpty()
+                ? Map.of()
+                : roomService.getRoomAvailabilities(roomTypeIds);
+
+        Map<UUID, Long> favoriteCounts = getFavoriteCounts(hotelIds);
+        Set<UUID> favoriteHotelIds = getFavoriteHotelIds(userId, hotelIds);
+
+        return hotels.map(hotel -> {
+            UUID hotelId = hotel.getId();
+            List<RoomType> roomTypes = roomTypesByHotelId.getOrDefault(hotelId, List.of());
+            Boolean isFavorite = userId == null ? null : favoriteHotelIds.contains(hotelId);
+            Long favoriteCount = favoriteCounts.getOrDefault(hotelId, 0L);
+            return mapToResponse(hotel, roomTypes, availabilityMap, favoriteCount, isFavorite);
+        });
+    }
+
+    private Map<UUID, Long> getFavoriteCounts(List<UUID> hotelIds) {
+        List<Object[]> rows = favoriteRepository.countFavoritesByHotelIds(hotelIds);
+        if (rows == null || rows.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<UUID, Long> counts = new HashMap<>();
+        for (Object[] row : rows) {
+            if (row.length >= 2 && row[0] instanceof UUID hotelId && row[1] instanceof Number count) {
+                counts.put(hotelId, count.longValue());
+            }
+        }
+        return counts;
+    }
+
+    private Set<UUID> getFavoriteHotelIds(UUID userId, List<UUID> hotelIds) {
+        if (userId == null) {
+            return Set.of();
+        }
+
+        List<UUID> favoriteHotelIds = favoriteRepository.findFavoriteHotelIdsByUserIdAndHotelIdIn(userId, hotelIds);
+        return favoriteHotelIds == null ? Set.of() : new HashSet<>(favoriteHotelIds);
+    }
+
+    private HotelResponse mapToResponse(Hotel hotel, UUID userId) {
+        List<RoomType> hotelRoomTypes = hotel.getRoomTypes() == null ? List.of() : hotel.getRoomTypes();
+        List<UUID> roomTypeIds = hotelRoomTypes.stream()
+                .map(RoomType::getId)
+                .filter(Objects::nonNull)
+                .toList();
+        Map<UUID, Integer> availabilityMap = roomService.getRoomAvailabilities(roomTypeIds);
         Boolean isFavorite = null;
         if (userId != null) {
             isFavorite = favoriteRepository.existsByUserIdAndHotelId(userId, hotel.getId());
         }
-        
-        // Get favorite count
         Long favoriteCount = favoriteRepository.countFavoritesByHotelId(hotel.getId());
-        
+
+        return mapToResponse(hotel, hotelRoomTypes, availabilityMap, favoriteCount, isFavorite);
+    }
+
+    private HotelResponse mapToResponse(
+            Hotel hotel,
+            List<RoomType> hotelRoomTypes,
+            Map<UUID, Integer> availabilityMap,
+            Long favoriteCount,
+            Boolean isFavorite) {
+        List<RoomTypeResponse> roomTypes = hotelRoomTypes.stream()
+                .map(roomType -> roomService.mapToResponse(roomType, availabilityMap.get(roomType.getId())))
+                .toList();
+        BigDecimal minPrice = hotelRoomTypes.stream()
+                .map(RoomType::getPricePerNight)
+                .filter(Objects::nonNull)
+                .min(BigDecimal::compareTo)
+                .orElse(null);
+        BigDecimal maxPrice = hotelRoomTypes.stream()
+                .map(RoomType::getPricePerNight)
+                .filter(Objects::nonNull)
+                .max(BigDecimal::compareTo)
+                .orElse(null);
+
         return HotelResponse.builder()
                 .id(hotel.getId())
                 .name(hotel.getName())

@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
@@ -33,8 +34,7 @@ public class PricingService {
     }
     
     private BigDecimal applyDynamicPricing(BigDecimal basePrice, LocalDate checkIn, LocalDate checkOut, UUID roomTypeId) {
-        // Use cached pricing multiplier for better performance
-        BigDecimal pricingMultiplier = getCachedPricingMultiplier(checkIn, checkOut, roomTypeId);
+        BigDecimal pricingMultiplier = calculatePricingMultiplier(checkIn, checkOut, roomTypeId);
         BigDecimal adjustedPrice = basePrice.multiply(pricingMultiplier);
         
         log.debug("Applied dynamic pricing: base={}, multiplier={}, final={}", 
@@ -43,7 +43,7 @@ public class PricingService {
         return adjustedPrice;
     }
     
-    private BigDecimal getCachedPricingMultiplier(LocalDate checkIn, LocalDate checkOut, UUID roomTypeId) {
+    private BigDecimal calculatePricingMultiplier(LocalDate checkIn, LocalDate checkOut, UUID roomTypeId) {
         log.debug("Calculating pricing multiplier for {} to {} (room type: {})", checkIn, checkOut, roomTypeId);
         
         BigDecimal multiplier = BigDecimal.ONE;
@@ -60,7 +60,7 @@ public class PricingService {
         // Future: Occupancy-based pricing (would require real-time occupancy data)
         // multiplier = multiplier.multiply(getOccupancyMultiplier(roomTypeId, checkIn, checkOut));
         
-        log.debug("Calculated pricing multiplier: {} (cached)", multiplier);
+        log.debug("Calculated pricing multiplier: {}", multiplier);
         return multiplier;
     }
     
@@ -84,7 +84,7 @@ public class PricingService {
         }
         
         // Calculate weighted multiplier
-        BigDecimal weekendWeight = BigDecimal.valueOf(weekendNights).divide(BigDecimal.valueOf(totalNights), 4, BigDecimal.ROUND_HALF_UP);
+        BigDecimal weekendWeight = BigDecimal.valueOf(weekendNights).divide(BigDecimal.valueOf(totalNights), 4, RoundingMode.HALF_UP);
         BigDecimal weekdayWeight = BigDecimal.ONE.subtract(weekendWeight);
         
         BigDecimal multiplier = weekdayWeight.add(weekendWeight.multiply(weekendPremium));
