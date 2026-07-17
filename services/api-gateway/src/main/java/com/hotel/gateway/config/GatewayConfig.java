@@ -20,7 +20,10 @@ public class GatewayConfig {
 
     @Value("${services.search-service.url:http://search-service:8084}")
     private String searchServiceUrl;
-    
+
+    @Value("${services.notification-service.url:http://notification-service:8085}")
+    private String notificationServiceUrl;
+
     @Bean
     public RouteLocator customRouteLocator(RouteLocatorBuilder builder) {
         return builder.routes()
@@ -52,6 +55,14 @@ public class GatewayConfig {
                     .circuitBreaker(config -> config
                         .setName("hotelServiceCB")
                         .setFallbackUri("forward:/fallback/hotels")))
+                .uri(hotelServiceUrl))
+
+            // Hotel favorites are a separate authenticated controller surface.
+            .route("hotel-favorites-service", r -> r
+                .path("/api/v1/favorites", "/api/v1/favorites/**")
+                .filters(f -> f
+                    .addRequestHeader("X-Service", "hotel-service")
+                    .addRequestHeader("X-Gateway", "api-gateway"))
                 .uri(hotelServiceUrl))
             
             // Booking Service routes (JWT required)
@@ -107,6 +118,11 @@ public class GatewayConfig {
                 .path("/health/search-service")
                 .filters(f -> f.rewritePath("/health/search-service", "/actuator/health"))
                 .uri(searchServiceUrl))
+
+            .route("notification-service-health", r -> r
+                .path("/health/notification-service")
+                .filters(f -> f.rewritePath("/health/notification-service", "/actuator/health"))
+                .uri(notificationServiceUrl))
             
             .build();
     }

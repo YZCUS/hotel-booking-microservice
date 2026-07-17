@@ -97,23 +97,16 @@ public class UserController {
     }
     
     private String extractUserRoleFromRequest(HttpServletRequest request) {
-        try {
-            // Try to get role from header first (set by API Gateway)
-            String role = request.getHeader("X-User-Role");
-            if (role != null && !role.trim().isEmpty()) {
-                return role.trim();
-            }
-            
-            // Fallback to default role if not found
-            log.debug("No role found in headers, defaulting to USER");
-            return "USER";
-        } catch (Exception e) {
-            log.warn("Failed to extract role from request", e);
-            return "USER"; // Default role
-        }
+        return jwtUtil.extractRole(extractTokenFromRequest(request));
     }
     
     private boolean isInternalServiceCall(HttpServletRequest request) {
+        // Gateway end-user traffic also carries a valid internal token. It must still
+        // be authorized as the JWT user rather than receiving service-level access.
+        if ("true".equalsIgnoreCase(request.getHeader("X-Authenticated"))) {
+            return false;
+        }
+
         // Check if Spring Security has already authenticated this as an internal service
         var auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
         if (auth != null && auth.isAuthenticated()) {

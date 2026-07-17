@@ -1,5 +1,6 @@
 package com.hotel.notification.service;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.hotel.notification.dto.BookingConfirmationData;
 import com.hotel.notification.dto.HotelInfo;
 import com.hotel.notification.dto.UserInfo;
@@ -12,7 +13,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import com.hotel.notification.exception.ServiceCommunicationException;
 
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.UUID;
@@ -42,6 +45,9 @@ public class NotificationService {
 
     @Value("${app.internal.token-header:X-Internal-Token}")
     private String tokenHeader;
+
+    @Value("${notification.http.timeout:3s}")
+    private Duration httpTimeout;
     
     public void sendBookingConfirmation(BookingCreatedEvent event) {
         try {
@@ -65,7 +71,7 @@ public class NotificationService {
                 .cancellationPolicy("Free cancellation up to 24 hours before check-in")
                 .build();
             
-            emailService.sendBookingConfirmationEmail(data);
+            emailService.sendBookingConfirmationEmail(data).join();
             log.info("Booking confirmation notification sent for booking: {}", event.getBookingId());
             
         } catch (Exception e) {
@@ -91,7 +97,7 @@ public class NotificationService {
                 .totalPrice(event.getTotalPrice())
                 .build();
             
-            emailService.sendBookingCancellationEmail(data);
+            emailService.sendBookingCancellationEmail(data).join();
             log.info("Booking cancellation notification sent for booking: {}", event.getBookingId());
             
         } catch (Exception e) {
@@ -102,11 +108,12 @@ public class NotificationService {
     
     public void sendWelcomeMessage(UserRegisteredEvent event) {
         try {
-            emailService.sendWelcomeEmail(event.getEmail(), event.getFullName());
+            emailService.sendWelcomeEmail(event.getEmail(), event.getFullName()).join();
             log.info("Welcome notification sent to user: {}", event.getUserId());
             
         } catch (Exception e) {
             log.error("Failed to send welcome notification to user: {}", event.getUserId(), e);
+            throw new RuntimeException("Failed to send welcome notification", e);
         }
     }
     
@@ -120,6 +127,7 @@ public class NotificationService {
                 .header(tokenHeader, generateInternalToken())
                 .retrieve()
                 .bodyToMono(UserInfo.class)
+                .timeout(httpTimeout)
                 .block();
             
             if (userInfo == null || userInfo.getEmail() == null || userInfo.getEmail().trim().isEmpty()) {
@@ -143,8 +151,11 @@ public class NotificationService {
             // Get room type info which includes hotel details
             HotelInfo hotelInfo = webClient.get()
                 .uri(hotelServiceUrl + "/api/v1/hotels/rooms/{roomTypeId}/hotel-details", roomTypeId)
+                .header(serviceHeader, serviceName)
+                .header(tokenHeader, generateInternalToken())
                 .retrieve()
                 .bodyToMono(HotelInfo.class)
+                .timeout(httpTimeout)
                 .block();
             
             if (hotelInfo == null || hotelInfo.getName() == null || hotelInfo.getName().trim().isEmpty()) {
@@ -166,7 +177,7 @@ public class NotificationService {
             long currentTimeMinutes = System.currentTimeMillis() / (1000 * 60);
             String data = serviceName + ":" + serviceSecret + ":" + currentTimeMinutes;
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(data.getBytes());
+            byte[] hash = digest.digest(data.getBytes(StandardCharsets.UTF_8));
             return Base64.getEncoder().encodeToString(hash).substring(0, 32);
         } catch (Exception e) {
             throw new ServiceCommunicationException("Cannot generate internal service token");
@@ -176,6 +187,7 @@ public class NotificationService {
     // Event classes - these would typically be in a shared library
     @Getter
     @Setter
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class BookingCreatedEvent {
         // Getters and setters
         private UUID bookingId;
@@ -190,6 +202,7 @@ public class NotificationService {
     
     @Getter
     @Setter
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class BookingCancelledEvent {
         // Getters and setters
         private UUID bookingId;
@@ -204,6 +217,7 @@ public class NotificationService {
 
     @Getter
     @Setter
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class UserRegisteredEvent {
         private UUID userId;
         private String email;

@@ -14,48 +14,12 @@ import org.springframework.context.annotation.Configuration;
 public class RabbitMQConfig {
     
     public static final String BOOKING_EXCHANGE = "booking.exchange";
-    public static final String BOOKING_CREATED_QUEUE = "booking.created.queue";
-    public static final String BOOKING_CANCELLED_QUEUE = "booking.cancelled.queue";
-    public static final String BOOKING_CREATED_ROUTING_KEY = "booking.created";
-    public static final String BOOKING_CANCELLED_ROUTING_KEY = "booking.cancelled";
+    public static final String BOOKING_CREATED_ROUTING_KEY = "booking.created.v2";
+    public static final String BOOKING_CANCELLED_ROUTING_KEY = "booking.cancelled.v2";
     
     @Bean
     public TopicExchange bookingExchange() {
         return new TopicExchange(BOOKING_EXCHANGE);
-    }
-    
-    @Bean
-    public Queue bookingCreatedQueue() {
-        return QueueBuilder.durable(BOOKING_CREATED_QUEUE)
-                .withArgument("x-dead-letter-exchange", BOOKING_EXCHANGE + ".dlx")
-                .withArgument("x-dead-letter-routing-key", "booking.created.dlq")
-                .withArgument("x-message-ttl", 1800000) // 30 minutes TTL for booking events
-                .build();
-    }
-    
-    @Bean
-    public Queue bookingCancelledQueue() {
-        return QueueBuilder.durable(BOOKING_CANCELLED_QUEUE)
-                .withArgument("x-dead-letter-exchange", BOOKING_EXCHANGE + ".dlx")
-                .withArgument("x-dead-letter-routing-key", "booking.cancelled.dlq")
-                .withArgument("x-message-ttl", 1800000) // 30 minutes TTL for booking events
-                .build();
-    }
-    
-    @Bean
-    public Binding bookingCreatedBinding() {
-        return BindingBuilder
-                .bind(bookingCreatedQueue())
-                .to(bookingExchange())
-                .with(BOOKING_CREATED_ROUTING_KEY);
-    }
-    
-    @Bean
-    public Binding bookingCancelledBinding() {
-        return BindingBuilder
-                .bind(bookingCancelledQueue())
-                .to(bookingExchange())
-                .with(BOOKING_CANCELLED_ROUTING_KEY);
     }
     
     @Bean
@@ -64,9 +28,10 @@ public class RabbitMQConfig {
     }
     
     @Bean
-    public AmqpTemplate amqpTemplate(ConnectionFactory connectionFactory) {
+    public RabbitTemplate amqpTemplate(ConnectionFactory connectionFactory) {
         RabbitTemplate rabbitTemplate = new RabbitTemplate(connectionFactory);
         rabbitTemplate.setMessageConverter(jsonMessageConverter());
+        rabbitTemplate.setMandatory(true);
         return rabbitTemplate;
     }
 }

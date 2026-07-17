@@ -1,6 +1,5 @@
 package com.hotel.user.config;
 
-import org.springframework.amqp.core.AmqpTemplate;
 import org.springframework.amqp.core.TopicExchange;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -13,7 +12,7 @@ import org.springframework.context.annotation.Configuration;
 public class RabbitMQConfig {
 
     public static final String USER_EXCHANGE = "user.exchange";
-    public static final String USER_REGISTERED_ROUTING_KEY = "user.registered";
+    public static final String USER_REGISTERED_ROUTING_KEY = "user.registered.v2";
 
     @Bean
     public TopicExchange userExchange() {
@@ -26,9 +25,10 @@ public class RabbitMQConfig {
     }
 
     @Bean
-    public AmqpTemplate amqpTemplate(ConnectionFactory connectionFactory) {
+    public RabbitTemplate amqpTemplate(ConnectionFactory connectionFactory) {
         RabbitTemplate rabbitTemplate = new RabbitTemplate(connectionFactory);
         rabbitTemplate.setMessageConverter(jsonMessageConverter());
+        rabbitTemplate.setMandatory(true);
         return rabbitTemplate;
     }
 }

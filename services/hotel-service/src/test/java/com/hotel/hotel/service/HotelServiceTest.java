@@ -2,8 +2,11 @@ package com.hotel.hotel.service;
 
 import com.hotel.hotel.dto.HotelRequest;
 import com.hotel.hotel.dto.HotelResponse;
+import com.hotel.hotel.dto.HotelExportResponse;
+import com.hotel.hotel.dto.RoomTypeResponse;
 import com.hotel.hotel.dto.SearchCriteria;
 import com.hotel.hotel.entity.Hotel;
+import com.hotel.hotel.entity.RoomType;
 import com.hotel.hotel.event.EventPublisher;
 import com.hotel.hotel.exception.HotelNotFoundException;
 import com.hotel.hotel.repository.HotelRepository;
@@ -302,6 +305,74 @@ class HotelServiceTest {
         verify(hotelRepository).findById(testHotelId);
         verify(hotelRepository).delete(testHotel);
         verify(eventPublisher).publishHotelDeleted(any());
+    }
+
+    @Test
+    void exportHotels_IncludesRoomProjectionAndAggregateAvailability() {
+        UUID roomTypeId = UUID.randomUUID();
+        RoomType roomType = RoomType.builder()
+                .id(roomTypeId)
+                .hotel(testHotel)
+                .name("King")
+                .capacity(2)
+                .pricePerNight(new BigDecimal("125.00"))
+                .totalInventory(5)
+                .build();
+        testHotel.setRoomTypes(List.of(roomType));
+        RoomTypeResponse roomResponse = RoomTypeResponse.builder()
+                .id(roomTypeId)
+                .hotelId(testHotelId)
+                .name("King")
+                .capacity(2)
+                .pricePerNight(new BigDecimal("125.00"))
+                .totalInventory(5)
+                .availableRooms(3)
+                .isAvailable(true)
+                .build();
+        when(hotelRepository.findAll()).thenReturn(List.of(testHotel));
+        when(roomService.getRoomAvailabilities(List.of(roomTypeId)))
+                .thenReturn(java.util.Map.of(roomTypeId, 3));
+        when(roomService.mapToResponse(roomType, 3)).thenReturn(roomResponse);
+        when(favoriteRepository.countFavoritesByHotelId(testHotelId)).thenReturn(0L);
+
+        List<HotelExportResponse> exported = hotelService.exportHotels();
+
+        assertEquals(1, exported.size());
+        assertEquals(5, exported.get(0).getTotalRooms());
+        assertEquals(3, exported.get(0).getAvailableRooms());
+        assertEquals(new BigDecimal("125.00"), exported.get(0).getMinPrice());
+        assertEquals(roomResponse, exported.get(0).getRoomTypes().get(0));
+        assertTrue(exported.get(0).getIsActive());
+    }
+
+    @Test
+    void exportHotels_InventoryOutageKeepsCatalogAndMarksAvailabilityUnknown() {
+        UUID roomTypeId = UUID.randomUUID();
+        RoomType roomType = RoomType.builder()
+                .id(roomTypeId)
+                .hotel(testHotel)
+                .name("King")
+                .capacity(2)
+                .pricePerNight(new BigDecimal("125.00"))
+                .totalInventory(5)
+                .build();
+        testHotel.setRoomTypes(List.of(roomType));
+        RoomTypeResponse roomResponse = RoomTypeResponse.builder()
+                .id(roomTypeId)
+                .totalInventory(5)
+                .availableRooms(null)
+                .isAvailable(null)
+                .build();
+        when(hotelRepository.findAll()).thenReturn(List.of(testHotel));
+        when(roomService.getRoomAvailabilities(List.of(roomTypeId))).thenReturn(java.util.Map.of());
+        when(roomService.mapToResponse(roomType, null)).thenReturn(roomResponse);
+
+        List<HotelExportResponse> exported = hotelService.exportHotels();
+
+        assertEquals(1, exported.size());
+        assertEquals(5, exported.getFirst().getTotalRooms());
+        assertNull(exported.getFirst().getAvailableRooms());
+        assertEquals(roomResponse, exported.getFirst().getRoomTypes().getFirst());
     }
     
     @Test

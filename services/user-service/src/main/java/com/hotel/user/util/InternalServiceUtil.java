@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Base64;
 
@@ -40,7 +41,9 @@ public class InternalServiceUtil {
             
             for (int i = -1; i <= 1; i++) {
                 String expectedToken = generateToken(serviceName, currentTimeMinutes + i);
-                if (expectedToken.equals(providedToken)) {
+                if (MessageDigest.isEqual(
+                        expectedToken.getBytes(StandardCharsets.UTF_8),
+                        providedToken.getBytes(StandardCharsets.UTF_8))) {
                     log.debug("Valid internal service call from: {}", serviceName);
                     return true;
                 }
@@ -62,7 +65,7 @@ public class InternalServiceUtil {
         try {
             String data = serviceName + ":" + config.getServiceSecret() + ":" + timestampMinutes;
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(data.getBytes());
+            byte[] hash = digest.digest(data.getBytes(StandardCharsets.UTF_8));
             return Base64.getEncoder().encodeToString(hash).substring(0, 32);
         } catch (Exception e) {
             throw new RuntimeException("Failed to generate internal service token", e);

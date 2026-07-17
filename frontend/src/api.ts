@@ -75,6 +75,7 @@ export async function loginUser(input: { email: string; password: string }): Pro
 
 export async function createBooking(
   token: string,
+  idempotencyKey: string,
   input: {
     userId: string;
     roomTypeId: string;
@@ -86,6 +87,7 @@ export async function createBooking(
   return request<Booking>('/bookings', {
     method: 'POST',
     token,
+    headers: { 'Idempotency-Key': idempotencyKey },
     body: JSON.stringify(input)
   });
 }
@@ -105,11 +107,11 @@ export async function cancelBooking(token: string, bookingId: string): Promise<B
 export async function fetchHealth(): Promise<HealthState[]> {
   const services: HealthState[] = [
     { name: 'Gateway', path: `${gatewayOrigin}/actuator/health`, status: 'UNKNOWN' },
-    { name: 'User', path: 'http://localhost:8081/actuator/health', status: 'UNKNOWN' },
-    { name: 'Hotel', path: 'http://localhost:8082/actuator/health', status: 'UNKNOWN' },
-    { name: 'Booking', path: 'http://localhost:8083/actuator/health', status: 'UNKNOWN' },
-    { name: 'Search', path: 'http://localhost:8084/actuator/health', status: 'UNKNOWN' },
-    { name: 'Notification', path: 'http://localhost:8085/actuator/health', status: 'UNKNOWN' }
+    { name: 'User', path: `${gatewayOrigin}/health/user-service`, status: 'UNKNOWN' },
+    { name: 'Hotel', path: `${gatewayOrigin}/health/hotel-service`, status: 'UNKNOWN' },
+    { name: 'Booking', path: `${gatewayOrigin}/health/booking-service`, status: 'UNKNOWN' },
+    { name: 'Search', path: `${gatewayOrigin}/health/search-service`, status: 'UNKNOWN' },
+    { name: 'Notification', path: `${gatewayOrigin}/health/notification-service`, status: 'UNKNOWN' }
   ];
 
   return Promise.all(

@@ -16,8 +16,6 @@ import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Service
 @RequiredArgsConstructor
@@ -50,7 +48,7 @@ public class AuthService {
         User saved = userRepository.save(user);
         
         // Generate JWT token
-        String token = jwtUtil.generateToken(saved.getEmail(), saved.getId());
+        String token = jwtUtil.generateToken(saved.getEmail(), saved.getId(), saved.getRole());
 
         UserRegisteredEvent event = UserRegisteredEvent.builder()
                 .userId(saved.getId())
@@ -58,7 +56,7 @@ public class AuthService {
                 .fullName(saved.getFullName())
                 .registeredAt(saved.getCreatedAt() != null ? saved.getCreatedAt() : java.time.LocalDateTime.now())
                 .build();
-        publishAfterCommit(() -> eventPublisher.publishUserRegistered(event));
+        eventPublisher.publishUserRegistered(event);
         
         log.info("User registered successfully: {}", saved.getEmail());
         
@@ -88,7 +86,7 @@ public class AuthService {
         }
         
         // Generate JWT token
-        String token = jwtUtil.generateToken(user.getEmail(), user.getId());
+        String token = jwtUtil.generateToken(user.getEmail(), user.getId(), user.getRole());
         
         log.info("User logged in successfully: {}", user.getEmail());
         
@@ -108,21 +106,4 @@ public class AuthService {
         return jwtUtil.extractEmail(token);
     }
 
-    private void publishAfterCommit(Runnable publisher) {
-        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            publisher.run();
-            return;
-        }
-
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                try {
-                    publisher.run();
-                } catch (Exception e) {
-                    log.error("Failed to publish user event after commit", e);
-                }
-            }
-        });
-    }
 }

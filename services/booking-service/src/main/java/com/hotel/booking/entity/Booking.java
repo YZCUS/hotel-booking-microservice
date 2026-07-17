@@ -14,7 +14,8 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "bookings")
+@Table(name = "bookings", uniqueConstraints =
+        @UniqueConstraint(name = "uk_bookings_user_idempotency", columnNames = {"user_id", "idempotency_key"}))
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -49,6 +50,9 @@ public class Booking {
     
     @Column(name = "room_number")
     private String roomNumber;
+
+    @Column(name = "idempotency_key", length = 128)
+    private String idempotencyKey;
     
     @Version  // Optimistic locking version control
     @Column(nullable = false)

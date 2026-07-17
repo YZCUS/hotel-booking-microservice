@@ -23,6 +23,8 @@ public interface BookingRepository extends JpaRepository<Booking, UUID> {
     
     Optional<Booking> findByIdAndUserId(UUID id, UUID userId);
 
+    Optional<Booking> findByUserIdAndIdempotencyKey(UUID userId, String idempotencyKey);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT b FROM Booking b WHERE b.id = :id AND b.userId = :userId")
     Optional<Booking> findByIdAndUserIdForUpdate(@Param("id") UUID id, @Param("userId") UUID userId);
@@ -60,4 +62,23 @@ public interface BookingRepository extends JpaRepository<Booking, UUID> {
     Long countByUserIdAndStatus(
             @Param("userId") UUID userId, 
             @Param("status") BookingStatus status);
+
+    @Query("SELECT CASE WHEN COUNT(b) > 0 THEN true ELSE false END FROM Booking b " +
+           "WHERE b.roomTypeId = :roomTypeId AND b.status IN ('CONFIRMED', 'CHECKED_IN')")
+    boolean existsActiveBookingForRoomType(@Param("roomTypeId") UUID roomTypeId);
+
+    @Query("SELECT CASE WHEN COUNT(b) > 0 THEN true ELSE false END FROM Booking b " +
+           "WHERE b.roomTypeId IN :roomTypeIds AND b.status IN ('CONFIRMED', 'CHECKED_IN')")
+    boolean existsActiveBookingForAnyRoomType(@Param("roomTypeIds") List<UUID> roomTypeIds);
+
+    @Query("SELECT CASE WHEN COUNT(b) > 0 THEN true ELSE false END FROM Booking b " +
+           "WHERE b.roomTypeId = :roomTypeId AND b.roomNumber = :roomNumber " +
+           "AND b.status = 'CHECKED_IN' AND b.id <> :bookingId " +
+           "AND b.checkInDate < :checkOut AND b.checkOutDate > :checkIn")
+    boolean existsOverlappingCheckedInRoom(
+            @Param("roomTypeId") UUID roomTypeId,
+            @Param("roomNumber") String roomNumber,
+            @Param("bookingId") UUID bookingId,
+            @Param("checkIn") LocalDate checkIn,
+            @Param("checkOut") LocalDate checkOut);
 }

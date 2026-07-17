@@ -4,6 +4,7 @@ import lombok.Getter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Set;
 
 @Configuration
@@ -13,7 +14,7 @@ public class InternalServiceConfig {
     @Value("${app.internal.service-secret:${INTERNAL_SERVICE_SECRET:default-secret-change-in-production}}")
     private String serviceSecret;
     
-    @Value("${app.internal.allowed-services:notification-service,booking-service,hotel-service}")
+    @Value("${app.internal.allowed-services:notification-service,booking-service,hotel-service,api-gateway}")
     private String[] allowedServices;
     
     @Value("${app.internal.token-header:X-Internal-Token}")
@@ -34,7 +35,8 @@ public class InternalServiceConfig {
         try {
             String data = serviceName + ":" + serviceSecret + ":" + timestampMinutes;
             return java.util.Base64.getEncoder().encodeToString(
-                java.security.MessageDigest.getInstance("SHA-256").digest(data.getBytes())
+                    java.security.MessageDigest.getInstance("SHA-256")
+                            .digest(data.getBytes(StandardCharsets.UTF_8))
             ).substring(0, 32); // Use first 32 chars for readability
         } catch (java.security.NoSuchAlgorithmException e) {
             throw new RuntimeException("SHA-256 algorithm not available", e);

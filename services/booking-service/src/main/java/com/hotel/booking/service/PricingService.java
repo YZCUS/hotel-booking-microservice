@@ -1,21 +1,12 @@
 package com.hotel.booking.service;
 
 import com.hotel.booking.dto.RoomTypeResponse;
-import com.hotel.booking.exception.ServiceCommunicationException;
-import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
-import io.github.resilience4j.retry.annotation.Retry;
-import io.github.resilience4j.timelimiter.annotation.TimeLimiter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.cache.annotation.Cacheable;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
 import java.math.BigDecimal;
-import java.time.Duration;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
@@ -25,126 +16,20 @@ import java.util.UUID;
 @Slf4j
 public class PricingService {
     
-    private final WebClient.Builder webClientBuilder;
-
-    @Value("${services.hotel-service.url:http://hotel-service:8082}")
-    private String hotelServiceUrl;
+    private final HotelCatalogClient hotelCatalogClient;
     
     public BigDecimal calculateTotalPrice(UUID roomTypeId, LocalDate checkIn, LocalDate checkOut) {
-        log.info("Calculating total price for roomType {} from {} to {}", roomTypeId, checkIn, checkOut);
-        
-        try {
-            // Get room type price from hotel service (now async with fallback)
-            BigDecimal pricePerNight = getRoomTypePriceAsync(roomTypeId)
-                .toFuture()
-                .get(); // Only for backward compatibility, will be removed later
-            
-            // Calculate number of nights
-            long numberOfNights = ChronoUnit.DAYS.between(checkIn, checkOut);
-            
-            // Calculate base price
-            BigDecimal basePrice = pricePerNight.multiply(BigDecimal.valueOf(numberOfNights));
-            
-            // Apply dynamic pricing adjustments (with caching)
-            BigDecimal adjustedPrice = applyDynamicPricing(basePrice, checkIn, checkOut, roomTypeId);
-            
-            log.info("Total price calculated: {} for {} nights (base: {}, adjusted: {})", 
-                adjustedPrice, numberOfNights, basePrice, adjustedPrice);
-            
-            return adjustedPrice;
-            
-        } catch (Exception e) {
-            log.error("Error calculating price for roomType: {}", roomTypeId, e);
-            throw new ServiceCommunicationException("Unable to calculate pricing: " + e.getMessage(), e);
-        }
+        return calculateTotalPrice(hotelCatalogClient.getRoomType(roomTypeId), checkIn, checkOut);
     }
-    
-    // New async method for future controller updates
+
+    public BigDecimal calculateTotalPrice(RoomTypeResponse roomType, LocalDate checkIn, LocalDate checkOut) {
+        long numberOfNights = ChronoUnit.DAYS.between(checkIn, checkOut);
+        BigDecimal basePrice = roomType.getPricePerNight().multiply(BigDecimal.valueOf(numberOfNights));
+        return applyDynamicPricing(basePrice, checkIn, checkOut, roomType.getId());
+    }
+
     public Mono<BigDecimal> calculateTotalPriceAsync(UUID roomTypeId, LocalDate checkIn, LocalDate checkOut) {
-        log.info("Calculating total price async for roomType {} from {} to {}", roomTypeId, checkIn, checkOut);
-        
-        return getRoomTypePriceAsync(roomTypeId)
-            .map(pricePerNight -> {
-                long numberOfNights = ChronoUnit.DAYS.between(checkIn, checkOut);
-                BigDecimal basePrice = pricePerNight.multiply(BigDecimal.valueOf(numberOfNights));
-                BigDecimal adjustedPrice = applyDynamicPricing(basePrice, checkIn, checkOut, roomTypeId);
-                
-                log.info("Total price calculated async: {} for {} nights", adjustedPrice, numberOfNights);
-                return adjustedPrice;
-            })
-            .onErrorMap(e -> {
-                log.error("Error calculating price async for roomType: {}", roomTypeId, e);
-                return new ServiceCommunicationException("Unable to calculate pricing: " + e.getMessage(), e);
-            });
-    }
-    
-    @CircuitBreaker(name = "hotel-service", fallbackMethod = "getRoomTypePriceFallback")
-    @Retry(name = "hotel-service")
-    @TimeLimiter(name = "hotel-service")
-    @Cacheable(value = "room-prices", key = "#roomTypeId", unless = "#result == null")
-    public Mono<BigDecimal> getRoomTypePriceAsync(UUID roomTypeId) {
-        log.debug("Fetching room type price for: {}", roomTypeId);
-        
-        WebClient webClient = webClientBuilder
-            .baseUrl(hotelServiceUrl)
-            .build();
-        
-        return webClient.get()
-            .uri("/api/v1/hotels/rooms/{id}", roomTypeId)
-            .retrieve()
-            .onStatus(HttpStatusCode::is4xxClientError, clientResponse -> {
-                log.warn("Room type not found: {}", roomTypeId);
-                return Mono.error(new ServiceCommunicationException("Room type not found: " + roomTypeId));
-            })
-            .onStatus(HttpStatusCode::is5xxServerError, clientResponse -> {
-                log.error("Hotel service unavailable for room type: {}", roomTypeId);
-                return Mono.error(new ServiceCommunicationException("Hotel service unavailable"));
-            })
-            .bodyToMono(RoomTypeResponse.class)
-            .map(response -> {
-                if (response != null && response.getPricePerNight() != null) {
-                    log.debug("Retrieved price {} for room type {}", response.getPricePerNight(), roomTypeId);
-                    return response.getPricePerNight();
-                }
-                log.warn("Invalid response for room type: {}, using default price", roomTypeId);
-                return getDefaultPrice();
-            })
-            .onErrorReturn(ServiceCommunicationException.class, getDefaultPrice())
-            .doOnError(e -> log.error("Error fetching room type price for: {}", roomTypeId, e));
-    }
-    
-    // Fallback method for circuit breaker
-    public Mono<BigDecimal> getRoomTypePriceFallback(UUID roomTypeId, Exception ex) {
-        log.warn("Hotel service circuit breaker activated for room type {}, using fallback price. Error: {}", 
-                roomTypeId, ex.getMessage());
-        return Mono.just(getDefaultPrice());
-    }
-    
-    // Legacy sync method for backward compatibility (deprecated)
-    @Deprecated
-    @Cacheable(value = "room-prices", key = "#roomTypeId", unless = "#result == null")
-    private BigDecimal getRoomTypePrice(UUID roomTypeId) {
-        try {
-            WebClient webClient = webClientBuilder
-                .baseUrl(hotelServiceUrl)
-                .build();
-            
-            log.debug("Calling hotel service for room type price (sync - deprecated): {}", roomTypeId);
-            
-            // Use the async method and block for backward compatibility
-            return getRoomTypePriceAsync(roomTypeId)
-                .timeout(Duration.ofSeconds(5))
-                .block();
-            
-        } catch (Exception e) {
-            log.error("Error in legacy sync method for room type: {}", roomTypeId, e);
-            return getDefaultPrice();
-        }
-    }
-    
-    private BigDecimal getDefaultPrice() {
-        log.warn("Using default price as fallback");
-        return BigDecimal.valueOf(100.00); // Default $100 per night
+        return Mono.fromCallable(() -> calculateTotalPrice(roomTypeId, checkIn, checkOut));
     }
     
     private BigDecimal applyDynamicPricing(BigDecimal basePrice, LocalDate checkIn, LocalDate checkOut, UUID roomTypeId) {
@@ -158,9 +43,6 @@ public class PricingService {
         return adjustedPrice;
     }
     
-    @Cacheable(value = "pricing-multipliers", 
-               key = "#checkIn + '_' + #checkOut + '_' + #roomTypeId",
-               unless = "#result == null")
     private BigDecimal getCachedPricingMultiplier(LocalDate checkIn, LocalDate checkOut, UUID roomTypeId) {
         log.debug("Calculating pricing multiplier for {} to {} (room type: {})", checkIn, checkOut, roomTypeId);
         

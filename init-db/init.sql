@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS user_svc.users (
     password_hash VARCHAR(255) NOT NULL,
     full_name VARCHAR(100),
     phone VARCHAR(20),
+    role VARCHAR(30) DEFAULT 'USER' NOT NULL,
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -53,8 +54,12 @@ CREATE TABLE IF NOT EXISTS booking_svc.room_inventory (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     room_type_id UUID NOT NULL, -- Removed FK constraint - validate in application
     date DATE NOT NULL,
+    total_rooms INTEGER NOT NULL,
     available_rooms INTEGER NOT NULL,
     version INTEGER DEFAULT 0 NOT NULL,
+    CONSTRAINT room_inventory_total_nonnegative CHECK (total_rooms >= 0),
+    CONSTRAINT room_inventory_available_bounds
+        CHECK (available_rooms >= 0 AND available_rooms <= total_rooms),
     UNIQUE(room_type_id, date)
 );
 
@@ -69,6 +74,7 @@ CREATE TABLE IF NOT EXISTS booking_svc.bookings (
     total_price DECIMAL(10, 2) NOT NULL,
     status VARCHAR(50) NOT NULL DEFAULT 'PENDING',
     room_number VARCHAR(20),
+    idempotency_key VARCHAR(128),
     version INTEGER DEFAULT 0 NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -92,11 +98,79 @@ CREATE TABLE IF NOT EXISTS search_svc.search_history (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Transactional event outboxes (one table per producer-owned schema)
+CREATE TABLE IF NOT EXISTS user_svc.outbox_events (
+    id UUID PRIMARY KEY,
+    exchange_name VARCHAR(255) NOT NULL,
+    routing_key VARCHAR(255) NOT NULL,
+    event_type VARCHAR(255) NOT NULL,
+    payload TEXT NOT NULL,
+    attempts INTEGER DEFAULT 0 NOT NULL,
+    next_attempt_at TIMESTAMP NOT NULL,
+    published_at TIMESTAMP,
+    last_error TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS hotel_svc.outbox_events
+    (LIKE user_svc.outbox_events INCLUDING ALL);
+
+CREATE TABLE IF NOT EXISTS booking_svc.outbox_events
+    (LIKE user_svc.outbox_events INCLUDING ALL);
+
 -- Schema drift safety for existing local volumes
+ALTER TABLE user_svc.users ADD COLUMN IF NOT EXISTS role VARCHAR(30) DEFAULT 'USER' NOT NULL;
 ALTER TABLE hotel_svc.hotels ADD COLUMN IF NOT EXISTS version BIGINT DEFAULT 0 NOT NULL;
 ALTER TABLE hotel_svc.room_types ADD COLUMN IF NOT EXISTS version BIGINT DEFAULT 0 NOT NULL;
 ALTER TABLE booking_svc.room_inventory ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 0 NOT NULL;
 ALTER TABLE booking_svc.bookings ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 0 NOT NULL;
+ALTER TABLE booking_svc.room_inventory ADD COLUMN IF NOT EXISTS total_rooms INTEGER;
+UPDATE booking_svc.room_inventory ri
+SET total_rooms = GREATEST(
+    rt.total_inventory,
+    ri.available_rooms + (
+        SELECT COUNT(*)::INTEGER
+        FROM booking_svc.bookings b
+        WHERE b.room_type_id = ri.room_type_id
+          AND b.status IN ('CONFIRMED', 'CHECKED_IN')
+          AND b.check_in_date <= ri.date
+          AND b.check_out_date > ri.date
+    ))
+FROM hotel_svc.room_types rt
+WHERE ri.room_type_id = rt.id AND ri.total_rooms IS NULL;
+UPDATE booking_svc.room_inventory
+SET total_rooms = available_rooms + (
+    SELECT COUNT(*)::INTEGER
+    FROM booking_svc.bookings b
+    WHERE b.room_type_id = booking_svc.room_inventory.room_type_id
+      AND b.status IN ('CONFIRMED', 'CHECKED_IN')
+      AND b.check_in_date <= booking_svc.room_inventory.date
+      AND b.check_out_date > booking_svc.room_inventory.date
+)
+WHERE total_rooms IS NULL;
+ALTER TABLE booking_svc.room_inventory ALTER COLUMN total_rooms SET NOT NULL;
+ALTER TABLE booking_svc.bookings ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(128);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'room_inventory_total_nonnegative'
+          AND conrelid = 'booking_svc.room_inventory'::regclass
+    ) THEN
+        ALTER TABLE booking_svc.room_inventory
+            ADD CONSTRAINT room_inventory_total_nonnegative CHECK (total_rooms >= 0);
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'room_inventory_available_bounds'
+          AND conrelid = 'booking_svc.room_inventory'::regclass
+    ) THEN
+        ALTER TABLE booking_svc.room_inventory
+            ADD CONSTRAINT room_inventory_available_bounds
+            CHECK (available_rooms >= 0 AND available_rooms <= total_rooms);
+    END IF;
+END $$;
 
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_users_email ON user_svc.users(email);
@@ -117,9 +191,22 @@ CREATE INDEX IF NOT EXISTS idx_bookings_user_id ON booking_svc.bookings(user_id)
 CREATE INDEX IF NOT EXISTS idx_bookings_dates ON booking_svc.bookings(check_in_date, check_out_date);
 CREATE INDEX IF NOT EXISTS idx_bookings_status ON booking_svc.bookings(status);
 CREATE INDEX IF NOT EXISTS idx_bookings_room_type ON booking_svc.bookings(room_type_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_bookings_user_idempotency
+    ON booking_svc.bookings(user_id, idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uk_checked_in_room_assignment
+    ON booking_svc.bookings(room_type_id, room_number)
+    WHERE status = 'CHECKED_IN';
 
 CREATE INDEX IF NOT EXISTS idx_user_favorites_user_id ON hotel_svc.user_favorites(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_favorites_hotel_id ON hotel_svc.user_favorites(hotel_id);
+
+CREATE INDEX IF NOT EXISTS idx_user_outbox_pending
+    ON user_svc.outbox_events(published_at, next_attempt_at, created_at);
+CREATE INDEX IF NOT EXISTS idx_hotel_outbox_pending
+    ON hotel_svc.outbox_events(published_at, next_attempt_at, created_at);
+CREATE INDEX IF NOT EXISTS idx_booking_outbox_pending
+    ON booking_svc.outbox_events(published_at, next_attempt_at, created_at);
 
 -- Sample data
 INSERT INTO hotel_svc.hotels (id, name, description, address, city, country, latitude, longitude, star_rating, amenities) VALUES
@@ -135,11 +222,13 @@ INSERT INTO hotel_svc.room_types (id, hotel_id, name, description, capacity, pri
     ('660e8400-e29b-41d4-a716-446655440004', '550e8400-e29b-41d4-a716-446655440003', 'Economy Room', 'Basic room for budget travelers', 2, 40.00, 15)
 ON CONFLICT (id) DO NOTHING;
 
--- Initialize room inventory for next 30 days
-INSERT INTO booking_svc.room_inventory (room_type_id, date, available_rooms)
+-- Initialize inventory through the maximum accepted booking stay
+-- (365-day advance check-in plus a 30-night stay).
+INSERT INTO booking_svc.room_inventory (room_type_id, date, total_rooms, available_rooms)
 SELECT 
     rt.id,
-    CURRENT_DATE + INTERVAL '1 day' * generate_series(0, 29),
+    CURRENT_DATE + INTERVAL '1 day' * generate_series(0, 395),
+    rt.total_inventory,
     rt.total_inventory
 FROM hotel_svc.room_types rt
 ON CONFLICT (room_type_id, date) DO NOTHING;

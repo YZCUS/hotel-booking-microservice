@@ -1,5 +1,6 @@
 package com.hotel.notification.listener;
 
+import com.hotel.notification.config.RabbitMQConfig;
 import com.hotel.notification.service.NotificationService;
 import com.hotel.notification.service.NotificationService.BookingCreatedEvent;
 import com.hotel.notification.service.NotificationService.BookingCancelledEvent;
@@ -15,7 +16,7 @@ public class BookingEventListener {
     
     private final NotificationService notificationService;
     
-    @RabbitListener(queues = "booking.created.queue")
+    @RabbitListener(queues = RabbitMQConfig.BOOKING_CREATED_QUEUE)
     public void handleBookingCreated(BookingCreatedEvent event) {
         log.info("Received booking created event: {}", event.getBookingId());
         
@@ -32,7 +33,7 @@ public class BookingEventListener {
         }
     }
     
-    @RabbitListener(queues = "booking.cancelled.queue")
+    @RabbitListener(queues = RabbitMQConfig.BOOKING_CANCELLED_QUEUE)
     public void handleBookingCancelled(BookingCancelledEvent event) {
         log.info("Received booking cancelled event: {}", event.getBookingId());
         

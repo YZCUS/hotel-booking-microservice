@@ -62,6 +62,8 @@ logging:
     name: logs/notification-service.log
 
 notification:
+  http:
+    timeout: ${NOTIFICATION_HTTP_TIMEOUT:3s}
   email:
     retry-attempts: 3
     retry-delay: 5000

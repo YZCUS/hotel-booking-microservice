@@ -3,6 +3,7 @@ package com.hotel.booking.service;
 import com.hotel.booking.dto.BookingRequest;
 import com.hotel.booking.dto.BookingResponse;
 import com.hotel.booking.dto.CheckInRequest;
+import com.hotel.booking.dto.RoomTypeResponse;
 import com.hotel.booking.entity.Booking;
 import com.hotel.booking.entity.BookingStatus;
 import com.hotel.booking.event.BookingCancelledEvent;
@@ -16,14 +17,13 @@ import com.hotel.booking.repository.BookingRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -41,6 +41,7 @@ public class BookingService {
     private final BookingRepository bookingRepository;
     private final InventoryService inventoryService;
     private final PricingService pricingService;
+    private final HotelCatalogClient hotelCatalogClient;
     private final EventPublisher eventPublisher;
     
     private static final int MAX_RETRY_ATTEMPTS = 3;
@@ -52,11 +53,41 @@ public class BookingService {
     )
     @Transactional(rollbackFor = Exception.class, isolation = Isolation.READ_COMMITTED)
     public BookingResponse createBooking(BookingRequest request) {
+        return createBooking(request, null);
+    }
+
+    @Retryable(
+        value = {OptimisticLockingFailureException.class},
+        maxAttempts = MAX_RETRY_ATTEMPTS,
+        backoff = @Backoff(delay = 100, multiplier = 2)
+    )
+    @Transactional(rollbackFor = Exception.class, isolation = Isolation.READ_COMMITTED)
+    public BookingResponse createBooking(BookingRequest request, String idempotencyKey) {
         log.info("Creating booking for user: {} from {} to {}", 
             request.getUserId(), request.getCheckInDate(), request.getCheckOutDate());
         
         // Validate booking dates
         validateBookingDates(request.getCheckInDate(), request.getCheckOutDate());
+
+        String normalizedIdempotencyKey = normalizeIdempotencyKey(idempotencyKey);
+        if (normalizedIdempotencyKey != null) {
+            Booking existing = bookingRepository
+                    .findByUserIdAndIdempotencyKey(request.getUserId(), normalizedIdempotencyKey)
+                    .orElse(null);
+            if (existing != null) {
+                validateIdempotentRetry(existing, request);
+                return mapToResponse(existing);
+            }
+        }
+
+        // Remote catalog and pricing work must finish before holding inventory locks.
+        RoomTypeResponse roomType = hotelCatalogClient.getRoomType(request.getRoomTypeId());
+        if (request.getGuests() > roomType.getCapacity()) {
+            throw new BookingConflictException(
+                    "Guest count exceeds room capacity of " + roomType.getCapacity());
+        }
+        BigDecimal totalPrice = pricingService.calculateTotalPrice(
+                roomType, request.getCheckInDate(), request.getCheckOutDate());
         
         // Check and reserve inventory (with optimistic locking)
         try {
@@ -71,13 +102,6 @@ public class BookingService {
                 throw new InsufficientInventoryException("No rooms available for selected dates");
             }
             
-            // Calculate total price
-            BigDecimal totalPrice = pricingService.calculateTotalPrice(
-                request.getRoomTypeId(),
-                request.getCheckInDate(),
-                request.getCheckOutDate()
-            );
-            
             // Create booking
             Booking booking = Booking.builder()
                 .userId(request.getUserId())
@@ -87,9 +111,16 @@ public class BookingService {
                 .guests(request.getGuests())
                 .totalPrice(totalPrice)
                 .status(BookingStatus.CONFIRMED)
+                .idempotencyKey(normalizedIdempotencyKey)
                 .build();
             
-            Booking saved = bookingRepository.save(booking);
+            Booking saved;
+            try {
+                saved = bookingRepository.saveAndFlush(booking);
+            } catch (DataIntegrityViolationException e) {
+                throw new BookingConflictException(
+                        "Idempotency-Key is already being processed", e);
+            }
             
             BookingCreatedEvent event = BookingCreatedEvent.builder()
                 .bookingId(saved.getId())
@@ -101,7 +132,7 @@ public class BookingService {
                 .totalPrice(saved.getTotalPrice())
                 .createdAt(saved.getCreatedAt() != null ? saved.getCreatedAt() : LocalDateTime.now())
                 .build();
-            publishAfterCommit(() -> eventPublisher.publishBookingCreated(event));
+            eventPublisher.publishBookingCreated(event);
             
             log.info("Successfully created booking: {} for user: {}", saved.getId(), request.getUserId());
             return mapToResponse(saved);
@@ -170,7 +201,7 @@ public class BookingService {
                 .cancelledAt(LocalDateTime.now())
                 .reason("User cancellation")
                 .build();
-            publishAfterCommit(() -> eventPublisher.publishBookingCancelled(event));
+            eventPublisher.publishBookingCancelled(event);
             
             log.info("Successfully cancelled booking: {}", bookingId);
             return mapToResponse(updated);
@@ -194,12 +225,25 @@ public class BookingService {
         if (!booking.getCheckInDate().equals(LocalDate.now())) {
             throw new BookingConflictException("Check-in is only allowed on the scheduled date");
         }
+
+        if (bookingRepository.existsOverlappingCheckedInRoom(
+                booking.getRoomTypeId(), request.getRoomNumber(), booking.getId(),
+                booking.getCheckInDate(), booking.getCheckOutDate())) {
+            throw new BookingConflictException(
+                    "Room " + request.getRoomNumber() + " is already assigned for overlapping dates");
+        }
         
         // Assign room and update status
         booking.setRoomNumber(request.getRoomNumber());
         booking.setStatus(BookingStatus.CHECKED_IN);
         
-        Booking updated = bookingRepository.save(booking);
+        Booking updated;
+        try {
+            updated = bookingRepository.saveAndFlush(booking);
+        } catch (DataIntegrityViolationException e) {
+            throw new BookingConflictException(
+                    "Room " + request.getRoomNumber() + " is already assigned", e);
+        }
         
         log.info("Successfully checked in booking: {} to room: {}", bookingId, request.getRoomNumber());
         return mapToResponse(updated);
@@ -217,6 +261,8 @@ public class BookingService {
         
         if (LocalDate.now().isBefore(booking.getCheckOutDate())) {
             log.warn("Early checkout for booking: {}", bookingId);
+            inventoryService.releaseInventory(
+                    booking.getRoomTypeId(), LocalDate.now(), booking.getCheckOutDate(), 1);
         }
         
         booking.setStatus(BookingStatus.CHECKED_OUT);
@@ -264,23 +310,30 @@ public class BookingService {
             throw new IllegalArgumentException("Cannot book for more than 30 nights");
         }
     }
-    
-    private void publishAfterCommit(Runnable publisher) {
-        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            publisher.run();
-            return;
-        }
 
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                try {
-                    publisher.run();
-                } catch (Exception e) {
-                    log.error("Failed to publish booking event after commit", e);
-                }
-            }
-        });
+    private String normalizeIdempotencyKey(String idempotencyKey) {
+        if (idempotencyKey == null) {
+            return null;
+        }
+        if (idempotencyKey.isBlank()) {
+            throw new IllegalArgumentException("Idempotency-Key must not be blank");
+        }
+        String normalized = idempotencyKey.trim();
+        if (normalized.length() > 128) {
+            throw new IllegalArgumentException("Idempotency-Key must not exceed 128 characters");
+        }
+        return normalized;
+    }
+
+    private void validateIdempotentRetry(Booking existing, BookingRequest request) {
+        boolean sameRequest = existing.getRoomTypeId().equals(request.getRoomTypeId())
+                && existing.getCheckInDate().equals(request.getCheckInDate())
+                && existing.getCheckOutDate().equals(request.getCheckOutDate())
+                && existing.getGuests().equals(request.getGuests());
+        if (!sameRequest) {
+            throw new BookingConflictException(
+                    "Idempotency-Key was already used for a different booking request");
+        }
     }
     
     private BookingResponse mapToResponse(Booking booking) {

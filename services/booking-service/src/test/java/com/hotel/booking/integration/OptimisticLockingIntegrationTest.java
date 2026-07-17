@@ -45,6 +45,7 @@ class OptimisticLockingIntegrationTest {
         RoomInventory inventory = RoomInventory.builder()
                 .roomTypeId(roomTypeId)
                 .date(testDate)
+                .totalRooms(10)
                 .availableRooms(10)
                 .build();
         inventoryRepository.save(inventory);

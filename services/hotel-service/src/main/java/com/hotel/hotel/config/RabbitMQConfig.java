@@ -1,6 +1,5 @@
 package com.hotel.hotel.config;
 
-import org.springframework.amqp.core.AmqpTemplate;
 import org.springframework.amqp.core.TopicExchange;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -13,9 +12,9 @@ import org.springframework.context.annotation.Configuration;
 public class RabbitMQConfig {
 
     public static final String HOTEL_EXCHANGE = "hotel.exchange";
-    public static final String HOTEL_CREATED_ROUTING_KEY = "hotel.created";
-    public static final String HOTEL_UPDATED_ROUTING_KEY = "hotel.updated";
-    public static final String HOTEL_DELETED_ROUTING_KEY = "hotel.deleted";
+    public static final String HOTEL_CREATED_ROUTING_KEY = "hotel.created.v2";
+    public static final String HOTEL_UPDATED_ROUTING_KEY = "hotel.updated.v2";
+    public static final String HOTEL_DELETED_ROUTING_KEY = "hotel.deleted.v2";
 
     @Bean
     public TopicExchange hotelExchange() {
@@ -28,9 +27,10 @@ public class RabbitMQConfig {
     }
 
     @Bean
-    public AmqpTemplate amqpTemplate(ConnectionFactory connectionFactory) {
+    public RabbitTemplate amqpTemplate(ConnectionFactory connectionFactory) {
         RabbitTemplate rabbitTemplate = new RabbitTemplate(connectionFactory);
         rabbitTemplate.setMessageConverter(jsonMessageConverter());
+        rabbitTemplate.setMandatory(true);
         return rabbitTemplate;
     }
 }

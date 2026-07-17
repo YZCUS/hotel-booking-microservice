@@ -8,13 +8,14 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.util.ArrayList;
+import java.util.List;
 
 @Component
 @RequiredArgsConstructor
@@ -45,8 +46,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         
         if (email != null && SecurityContextHolder.getContext().getAuthentication() == null) {
             if (jwtUtil.validateToken(jwtToken, email)) {
+                String role = jwtUtil.extractRole(jwtToken);
+                if (role == null || role.isBlank()) {
+                    log.warn("JWT is missing required role claim");
+                    filterChain.doFilter(request, response);
+                    return;
+                }
                 UsernamePasswordAuthenticationToken authToken = 
-                    new UsernamePasswordAuthenticationToken(email, null, new ArrayList<>());
+                    new UsernamePasswordAuthenticationToken(email, null,
+                            List.of(new SimpleGrantedAuthority("ROLE_" + role)));
                 authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                 SecurityContextHolder.getContext().setAuthentication(authToken);
             }

@@ -1,9 +1,9 @@
 package com.hotel.user.event;
 
 import com.hotel.user.config.RabbitMQConfig;
+import com.hotel.outbox.OutboxService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.amqp.core.AmqpTemplate;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -11,13 +11,14 @@ import org.springframework.stereotype.Service;
 @Slf4j
 public class EventPublisher {
 
-    private final AmqpTemplate amqpTemplate;
+    private final OutboxService outboxService;
 
     public void publishUserRegistered(UserRegisteredEvent event) {
-        log.info("Publishing user registered event for user: {}", event.getUserId());
-        amqpTemplate.convertAndSend(
+        log.info("Queueing user registered event for user: {}", event.getUserId());
+        outboxService.enqueue(
                 RabbitMQConfig.USER_EXCHANGE,
                 RabbitMQConfig.USER_REGISTERED_ROUTING_KEY,
+                "user.registered.v1",
                 event);
     }
 }

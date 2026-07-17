@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   BedDouble,
   CalendarDays,
@@ -45,6 +45,7 @@ const initialAuth = {
 };
 
 function App() {
+  const bookingAttemptRef = useRef<{ signature: string; key: string } | null>(null);
   const [hotels, setHotels] = useState<Hotel[]>([]);
   const [selectedHotel, setSelectedHotel] = useState<Hotel | null>(null);
   const [rooms, setRooms] = useState<RoomType[]>([]);
@@ -162,14 +163,21 @@ function App() {
       return;
     }
 
+    const input = {
+      userId: auth.userId,
+      roomTypeId: selectedRoom.id,
+      checkInDate: bookingForm.checkInDate,
+      checkOutDate: bookingForm.checkOutDate,
+      guests: bookingForm.guests
+    };
+    const signature = JSON.stringify(input);
+    if (bookingAttemptRef.current?.signature !== signature) {
+      bookingAttemptRef.current = { signature, key: crypto.randomUUID() };
+    }
+
     await run('booking', async () => {
-      const booking = await createBooking(auth.token, {
-        userId: auth.userId,
-        roomTypeId: selectedRoom.id,
-        checkInDate: bookingForm.checkInDate,
-        checkOutDate: bookingForm.checkOutDate,
-        guests: bookingForm.guests
-      });
+      const booking = await createBooking(auth.token, bookingAttemptRef.current!.key, input);
+      bookingAttemptRef.current = null;
       setBookings((current) => [booking, ...current]);
       setNotice({ tone: 'success', text: `Booking ${booking.id.slice(0, 8)} confirmed.` });
       setAvailable(null);

@@ -2,12 +2,15 @@ package com.hotel.booking.service;
 
 import com.hotel.booking.dto.BookingRequest;
 import com.hotel.booking.dto.BookingResponse;
+import com.hotel.booking.dto.RoomTypeResponse;
+import com.hotel.booking.dto.CheckInRequest;
 import com.hotel.booking.entity.Booking;
 import com.hotel.booking.entity.BookingStatus;
 import com.hotel.booking.event.EventPublisher;
 import com.hotel.booking.exception.BookingConflictException;
 import com.hotel.booking.exception.BookingNotFoundException;
 import com.hotel.booking.exception.InsufficientInventoryException;
+import com.hotel.booking.exception.ServiceCommunicationException;
 import com.hotel.booking.repository.BookingRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -16,6 +19,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -37,6 +41,9 @@ class BookingServiceTest {
 
     @Mock
     private PricingService pricingService;
+
+    @Mock
+    private HotelCatalogClient hotelCatalogClient;
 
     @Mock
     private EventPublisher eventPublisher;
@@ -80,9 +87,10 @@ class BookingServiceTest {
     @Test
     void createBooking_Success() {
         // Given
+        when(hotelCatalogClient.getRoomType(roomTypeId)).thenReturn(roomType(4));
         when(inventoryService.reserveInventory(any(), any(), any(), eq(1))).thenReturn(true);
-        when(pricingService.calculateTotalPrice(any(), any(), any())).thenReturn(BigDecimal.valueOf(200));
-        when(bookingRepository.save(any(Booking.class))).thenReturn(booking);
+        when(pricingService.calculateTotalPrice(any(RoomTypeResponse.class), any(), any())).thenReturn(BigDecimal.valueOf(200));
+        when(bookingRepository.saveAndFlush(any(Booking.class))).thenReturn(booking);
 
         // When
         BookingResponse response = bookingService.createBooking(bookingRequest);
@@ -96,15 +104,16 @@ class BookingServiceTest {
         
         verify(inventoryService).reserveInventory(roomTypeId, bookingRequest.getCheckInDate(), 
                 bookingRequest.getCheckOutDate(), 1);
-        verify(pricingService).calculateTotalPrice(roomTypeId, bookingRequest.getCheckInDate(), 
-                bookingRequest.getCheckOutDate());
-        verify(bookingRepository).save(any(Booking.class));
+        verify(pricingService).calculateTotalPrice(any(RoomTypeResponse.class), eq(bookingRequest.getCheckInDate()),
+                eq(bookingRequest.getCheckOutDate()));
+        verify(bookingRepository).saveAndFlush(any(Booking.class));
         verify(eventPublisher).publishBookingCreated(any());
     }
 
     @Test
     void createBooking_InsufficientInventory() {
         // Given
+        when(hotelCatalogClient.getRoomType(roomTypeId)).thenReturn(roomType(4));
         when(inventoryService.reserveInventory(any(), any(), any(), eq(1))).thenReturn(false);
 
         // When & Then
@@ -113,7 +122,7 @@ class BookingServiceTest {
         
         verify(inventoryService).reserveInventory(roomTypeId, bookingRequest.getCheckInDate(), 
                 bookingRequest.getCheckOutDate(), 1);
-        verify(pricingService, never()).calculateTotalPrice(any(), any(), any());
+        verify(pricingService).calculateTotalPrice(any(RoomTypeResponse.class), any(), any());
         verify(bookingRepository, never()).save(any());
         verify(eventPublisher, never()).publishBookingCreated(any());
     }
@@ -121,6 +130,7 @@ class BookingServiceTest {
     @Test
     void createBooking_OptimisticLockingFailure() {
         // Given
+        when(hotelCatalogClient.getRoomType(roomTypeId)).thenReturn(roomType(4));
         when(inventoryService.reserveInventory(any(), any(), any(), eq(1)))
                 .thenThrow(new OptimisticLockingFailureException("Optimistic lock failure"));
 
@@ -232,13 +242,125 @@ class BookingServiceTest {
     @Test
     void createBooking_FailureRollsBackTransactionWithoutManualInventoryRelease() {
         // Given
+        when(hotelCatalogClient.getRoomType(roomTypeId)).thenReturn(roomType(4));
         when(inventoryService.reserveInventory(any(), any(), any(), eq(1))).thenReturn(true);
-        when(pricingService.calculateTotalPrice(any(), any(), any())).thenReturn(BigDecimal.valueOf(200));
-        when(bookingRepository.save(any(Booking.class))).thenThrow(new RuntimeException("Database error"));
+        when(pricingService.calculateTotalPrice(any(RoomTypeResponse.class), any(), any())).thenReturn(BigDecimal.valueOf(200));
+        when(bookingRepository.saveAndFlush(any(Booking.class))).thenThrow(new RuntimeException("Database error"));
 
         // When & Then
         assertThrows(RuntimeException.class, () -> bookingService.createBooking(bookingRequest));
         
         verify(inventoryService, never()).releaseInventory(any(), any(), any(), anyInt());
+    }
+
+    @Test
+    void createBooking_FetchesCatalogAndPriceBeforeInventoryLock() {
+        when(hotelCatalogClient.getRoomType(roomTypeId)).thenReturn(roomType(4));
+        when(pricingService.calculateTotalPrice(any(RoomTypeResponse.class), any(), any()))
+                .thenReturn(BigDecimal.valueOf(200));
+        when(inventoryService.reserveInventory(any(), any(), any(), eq(1))).thenReturn(true);
+        when(bookingRepository.saveAndFlush(any(Booking.class))).thenReturn(booking);
+
+        bookingService.createBooking(bookingRequest, "request-1");
+
+        var ordered = inOrder(hotelCatalogClient, pricingService, inventoryService);
+        ordered.verify(hotelCatalogClient).getRoomType(roomTypeId);
+        ordered.verify(pricingService).calculateTotalPrice(any(RoomTypeResponse.class), any(), any());
+        ordered.verify(inventoryService).reserveInventory(roomTypeId,
+                bookingRequest.getCheckInDate(), bookingRequest.getCheckOutDate(), 1);
+    }
+
+    @Test
+    void createBooking_GuestsExceedCapacity_DoesNotReserveInventory() {
+        when(hotelCatalogClient.getRoomType(roomTypeId)).thenReturn(roomType(1));
+
+        assertThrows(BookingConflictException.class,
+                () -> bookingService.createBooking(bookingRequest, "request-capacity"));
+
+        verify(inventoryService, never()).reserveInventory(any(), any(), any(), anyInt());
+    }
+
+    @Test
+    void createBooking_CatalogFailureDoesNotReserveOrUseFallbackPrice() {
+        when(hotelCatalogClient.getRoomType(roomTypeId))
+                .thenThrow(new ServiceCommunicationException("catalog unavailable"));
+
+        assertThrows(ServiceCommunicationException.class,
+                () -> bookingService.createBooking(bookingRequest, "request-catalog-failure"));
+
+        verifyNoInteractions(pricingService, inventoryService);
+        verify(bookingRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void createBooking_IdempotentRetryReturnsExistingWithoutSecondReservation() {
+        booking.setIdempotencyKey("request-retry");
+        when(bookingRepository.findByUserIdAndIdempotencyKey(userId, "request-retry"))
+                .thenReturn(Optional.of(booking));
+
+        BookingResponse response = bookingService.createBooking(bookingRequest, "request-retry");
+
+        assertEquals(bookingId, response.getId());
+        verifyNoInteractions(hotelCatalogClient, inventoryService, pricingService);
+        verify(bookingRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void createBooking_BlankIdempotencyKeyIsRejectedBeforeSideEffects() {
+        assertThrows(IllegalArgumentException.class,
+                () -> bookingService.createBooking(bookingRequest, "   "));
+
+        verifyNoInteractions(hotelCatalogClient, pricingService, inventoryService);
+    }
+
+    @Test
+    void checkOut_EarlyCheckoutReleasesUnconsumedNights() {
+        booking.setStatus(BookingStatus.CHECKED_IN);
+        booking.setCheckInDate(LocalDate.now().minusDays(1));
+        booking.setCheckOutDate(LocalDate.now().plusDays(2));
+        when(bookingRepository.findById(bookingId)).thenReturn(Optional.of(booking));
+        when(bookingRepository.save(any(Booking.class))).thenReturn(booking);
+
+        bookingService.checkOut(bookingId);
+
+        verify(inventoryService).releaseInventory(roomTypeId, LocalDate.now(),
+                booking.getCheckOutDate(), 1);
+    }
+
+    @Test
+    void checkIn_OverlappingAssignedRoom_ReturnsConflict() {
+        booking.setStatus(BookingStatus.CONFIRMED);
+        booking.setCheckInDate(LocalDate.now());
+        when(bookingRepository.findById(bookingId)).thenReturn(Optional.of(booking));
+        when(bookingRepository.existsOverlappingCheckedInRoom(
+                roomTypeId, "101", bookingId, booking.getCheckInDate(), booking.getCheckOutDate()))
+                .thenReturn(true);
+
+        assertThrows(BookingConflictException.class,
+                () -> bookingService.checkIn(bookingId,
+                        CheckInRequest.builder().roomNumber("101").build()));
+
+        verify(bookingRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void checkIn_UniqueIndexRace_ReturnsConflict() {
+        booking.setStatus(BookingStatus.CONFIRMED);
+        booking.setCheckInDate(LocalDate.now());
+        when(bookingRepository.findById(bookingId)).thenReturn(Optional.of(booking));
+        when(bookingRepository.saveAndFlush(any(Booking.class)))
+                .thenThrow(new DataIntegrityViolationException("duplicate room assignment"));
+
+        assertThrows(BookingConflictException.class,
+                () -> bookingService.checkIn(bookingId,
+                        CheckInRequest.builder().roomNumber("101").build()));
+    }
+
+    private RoomTypeResponse roomType(int capacity) {
+        return RoomTypeResponse.builder()
+                .id(roomTypeId)
+                .capacity(capacity)
+                .pricePerNight(BigDecimal.valueOf(100))
+                .build();
     }
 }

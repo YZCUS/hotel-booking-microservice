@@ -13,8 +13,6 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./init-db:/docker-entrypoint-initdb.d
-    ports:
-      - "5432:5432"
     networks:
       - hotel-network
     healthcheck:
@@ -31,8 +29,6 @@ services:
     command: redis-server --appendonly yes --requirepass hotel_redis_pass
     volumes:
       - redis_data:/data
-    ports:
-      - "6379:6379"
     networks:
       - hotel-network
     healthcheck:
@@ -50,9 +46,6 @@ services:
       RABBITMQ_DEFAULT_USER: hotel_user
       RABBITMQ_DEFAULT_PASS: hotel_pass
       RABBITMQ_DEFAULT_VHOST: /
-    ports:
-      - "5672:5672"
-      - "15672:15672"
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     networks:
@@ -75,8 +68,6 @@ services:
       MEILI_HTTP_ADDR: 0.0.0.0:7700
     volumes:
       - meilisearch_data:/meili_data
-    ports:
-      - "7700:7700"
     networks:
       - hotel-network
     healthcheck:
@@ -92,16 +83,14 @@ services:
       context: ./services/user-service
       dockerfile: Dockerfile
     container_name: hotel-user-service
-    ports:
-      - "8081:8081"
     environment:
       SPRING_PROFILES_ACTIVE: docker
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/hotel_reservation
       SPRING_DATASOURCE_USERNAME: hotel_user
       SPRING_DATASOURCE_PASSWORD: hotel_password
-      SPRING_REDIS_HOST: redis
-      SPRING_REDIS_PORT: 6379
-      SPRING_REDIS_PASSWORD: hotel_redis_pass
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATA_REDIS_PASSWORD: hotel_redis_pass
       SPRING_RABBITMQ_HOST: rabbitmq
       SPRING_RABBITMQ_PORT: 5672
       SPRING_RABBITMQ_USERNAME: hotel_user
@@ -133,21 +122,20 @@ services:
       context: ./services/hotel-service
       dockerfile: Dockerfile
     container_name: hotel-hotel-service
-    ports:
-      - "8082:8082"
     environment:
       SPRING_PROFILES_ACTIVE: docker
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/hotel_reservation
       SPRING_DATASOURCE_USERNAME: hotel_user
       SPRING_DATASOURCE_PASSWORD: hotel_password
-      SPRING_REDIS_HOST: redis
-      SPRING_REDIS_PORT: 6379
-      SPRING_REDIS_PASSWORD: hotel_redis_pass
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATA_REDIS_PASSWORD: hotel_redis_pass
       SPRING_RABBITMQ_HOST: rabbitmq
       SPRING_RABBITMQ_PORT: 5672
       SPRING_RABBITMQ_USERNAME: hotel_user
       SPRING_RABBITMQ_PASSWORD: hotel_pass
       BOOKING_SERVICE_URL: http://booking-service:8083
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:-secure-shared-secret-change-in-production}
       SPRING_JPA_HIBERNATE_DDL_AUTO: validate
       SPRING_JPA_PROPERTIES_HIBERNATE_DEFAULT_SCHEMA: hotel_svc
     depends_on:
@@ -173,21 +161,20 @@ services:
       context: ./services/booking-service
       dockerfile: Dockerfile
     container_name: hotel-booking-service
-    ports:
-      - "8083:8083"
     environment:
       SPRING_PROFILES_ACTIVE: docker
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/hotel_reservation
       SPRING_DATASOURCE_USERNAME: hotel_user
       SPRING_DATASOURCE_PASSWORD: hotel_password
-      SPRING_REDIS_HOST: redis
-      SPRING_REDIS_PORT: 6379
-      SPRING_REDIS_PASSWORD: hotel_redis_pass
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATA_REDIS_PASSWORD: hotel_redis_pass
       SPRING_RABBITMQ_HOST: rabbitmq
       SPRING_RABBITMQ_PORT: 5672
       SPRING_RABBITMQ_USERNAME: hotel_user
       SPRING_RABBITMQ_PASSWORD: hotel_pass
       HOTEL_SERVICE_URL: http://hotel-service:8082
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:-secure-shared-secret-change-in-production}
       SPRING_JPA_HIBERNATE_DDL_AUTO: validate
       SPRING_JPA_PROPERTIES_HIBERNATE_DEFAULT_SCHEMA: booking_svc
     depends_on:
@@ -213,8 +200,6 @@ services:
       context: ./services/search-service
       dockerfile: Dockerfile
     container_name: hotel-search-service
-    ports:
-      - "8084:8084"
     environment:
       SPRING_PROFILES_ACTIVE: docker
       MEILISEARCH_HOST: http://meilisearch:7700
@@ -224,6 +209,7 @@ services:
       SPRING_RABBITMQ_PORT: 5672
       SPRING_RABBITMQ_USERNAME: hotel_user
       SPRING_RABBITMQ_PASSWORD: hotel_pass
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:-secure-shared-secret-change-in-production}
     depends_on:
       meilisearch:
         condition: service_healthy
@@ -245,8 +231,6 @@ services:
       context: ./services/notification-service
       dockerfile: Dockerfile
     container_name: hotel-notification-service
-    ports:
-      - "8085:8085"
     environment:
       SPRING_PROFILES_ACTIVE: docker
       SPRING_RABBITMQ_HOST: rabbitmq
@@ -284,10 +268,11 @@ services:
       - "8080:8080"
     environment:
       SPRING_PROFILES_ACTIVE: docker
-      SPRING_REDIS_HOST: redis
-      SPRING_REDIS_PORT: 6379
-      SPRING_REDIS_PASSWORD: hotel_redis_pass
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATA_REDIS_PASSWORD: hotel_redis_pass
       JWT_SECRET: ${JWT_SECRET:-myVerySecureSecretKey123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz}
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:-secure-shared-secret-change-in-production}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001,http://frontend:3000}
       USER_SERVICE_URL: http://user-service:8081
       HOTEL_SERVICE_URL: http://hotel-service:8082

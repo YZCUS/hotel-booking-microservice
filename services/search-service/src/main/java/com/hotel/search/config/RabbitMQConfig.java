@@ -18,16 +18,22 @@ public class RabbitMQConfig {
     public static final String SEARCH_EXCHANGE = "search.exchange";
     
     // Queue definitions
-    public static final String HOTEL_CREATED_QUEUE = "hotel.created.queue";
-    public static final String HOTEL_UPDATED_QUEUE = "hotel.updated.queue";
-    public static final String HOTEL_DELETED_QUEUE = "hotel.deleted.queue";
-    public static final String SEARCH_HISTORY_QUEUE = "search.history.queue";
+    public static final String HOTEL_CREATED_QUEUE = "hotel.created.queue.v2";
+    public static final String HOTEL_UPDATED_QUEUE = "hotel.updated.queue.v2";
+    public static final String HOTEL_DELETED_QUEUE = "hotel.deleted.queue.v2";
+    public static final String SEARCH_HISTORY_QUEUE = "search.history.queue.v2";
     
     // Routing keys
-    public static final String HOTEL_CREATED_KEY = "hotel.created";
-    public static final String HOTEL_UPDATED_KEY = "hotel.updated";
-    public static final String HOTEL_DELETED_KEY = "hotel.deleted";
-    public static final String SEARCH_HISTORY_KEY = "search.history";
+    public static final String HOTEL_CREATED_KEY = "hotel.created.v2";
+    public static final String HOTEL_UPDATED_KEY = "hotel.updated.v2";
+    public static final String HOTEL_DELETED_KEY = "hotel.deleted.v2";
+    public static final String SEARCH_HISTORY_KEY = "search.history.v2";
+    public static final String HOTEL_DLX = HOTEL_EXCHANGE + ".dlx.v2";
+    public static final String SEARCH_DLX = SEARCH_EXCHANGE + ".dlx.v2";
+    public static final String HOTEL_CREATED_DLQ = "hotel.created.dlq.v2";
+    public static final String HOTEL_UPDATED_DLQ = "hotel.updated.dlq.v2";
+    public static final String HOTEL_DELETED_DLQ = "hotel.deleted.dlq.v2";
+    public static final String SEARCH_HISTORY_DLQ = "search.history.dlq.v2";
     
     // Exchanges
     @Bean
@@ -44,8 +50,8 @@ public class RabbitMQConfig {
     @Bean
     public Queue hotelCreatedQueue() {
         return QueueBuilder.durable(HOTEL_CREATED_QUEUE)
-                .withArgument("x-dead-letter-exchange", HOTEL_EXCHANGE + ".dlx")
-                .withArgument("x-dead-letter-routing-key", "hotel.created.dlq")
+                .withArgument("x-dead-letter-exchange", HOTEL_DLX)
+                .withArgument("x-dead-letter-routing-key", HOTEL_CREATED_DLQ)
                 .withArgument("x-message-ttl", 3600000) // 1 hour TTL
                 .build();
     }
@@ -53,8 +59,8 @@ public class RabbitMQConfig {
     @Bean
     public Queue hotelUpdatedQueue() {
         return QueueBuilder.durable(HOTEL_UPDATED_QUEUE)
-                .withArgument("x-dead-letter-exchange", HOTEL_EXCHANGE + ".dlx")
-                .withArgument("x-dead-letter-routing-key", "hotel.updated.dlq")
+                .withArgument("x-dead-letter-exchange", HOTEL_DLX)
+                .withArgument("x-dead-letter-routing-key", HOTEL_UPDATED_DLQ)
                 .withArgument("x-message-ttl", 3600000)
                 .build();
     }
@@ -62,8 +68,8 @@ public class RabbitMQConfig {
     @Bean
     public Queue hotelDeletedQueue() {
         return QueueBuilder.durable(HOTEL_DELETED_QUEUE)
-                .withArgument("x-dead-letter-exchange", HOTEL_EXCHANGE + ".dlx")
-                .withArgument("x-dead-letter-routing-key", "hotel.deleted.dlq")
+                .withArgument("x-dead-letter-exchange", HOTEL_DLX)
+                .withArgument("x-dead-letter-routing-key", HOTEL_DELETED_DLQ)
                 .withArgument("x-message-ttl", 3600000)
                 .build();
     }
@@ -71,8 +77,8 @@ public class RabbitMQConfig {
     @Bean
     public Queue searchHistoryQueue() {
         return QueueBuilder.durable(SEARCH_HISTORY_QUEUE)
-                .withArgument("x-dead-letter-exchange", SEARCH_EXCHANGE + ".dlx")
-                .withArgument("x-dead-letter-routing-key", "search.history.dlq")
+                .withArgument("x-dead-letter-exchange", SEARCH_DLX)
+                .withArgument("x-dead-letter-routing-key", SEARCH_HISTORY_DLQ)
                 .withArgument("x-message-ttl", 7200000) // 2 hours TTL for search history (analytics data)
                 .build();
     }
@@ -112,61 +118,65 @@ public class RabbitMQConfig {
     
     // Dead Letter Queue setup
     @Bean
-    public FanoutExchange deadLetterExchange() {
-        return new FanoutExchange(HOTEL_EXCHANGE + ".dlx");
+    public DirectExchange deadLetterExchange() {
+        return new DirectExchange(HOTEL_DLX);
     }
     
     @Bean
-    public FanoutExchange searchDeadLetterExchange() {
-        return new FanoutExchange(SEARCH_EXCHANGE + ".dlx");
+    public DirectExchange searchDeadLetterExchange() {
+        return new DirectExchange(SEARCH_DLX);
     }
     
     @Bean
     public Queue hotelCreatedDeadLetterQueue() {
-        return new Queue("hotel.created.dlq", true);
+        return new Queue(HOTEL_CREATED_DLQ, true);
     }
     
     @Bean
     public Queue hotelUpdatedDeadLetterQueue() {
-        return new Queue("hotel.updated.dlq", true);
+        return new Queue(HOTEL_UPDATED_DLQ, true);
     }
     
     @Bean
     public Queue hotelDeletedDeadLetterQueue() {
-        return new Queue("hotel.deleted.dlq", true);
+        return new Queue(HOTEL_DELETED_DLQ, true);
     }
     
     @Bean
     public Binding hotelCreatedDLQBinding() {
         return BindingBuilder
                 .bind(hotelCreatedDeadLetterQueue())
-                .to(deadLetterExchange());
+                .to(deadLetterExchange())
+                .with(HOTEL_CREATED_DLQ);
     }
     
     @Bean
     public Binding hotelUpdatedDLQBinding() {
         return BindingBuilder
                 .bind(hotelUpdatedDeadLetterQueue())
-                .to(deadLetterExchange());
+                .to(deadLetterExchange())
+                .with(HOTEL_UPDATED_DLQ);
     }
     
     @Bean
     public Binding hotelDeletedDLQBinding() {
         return BindingBuilder
                 .bind(hotelDeletedDeadLetterQueue())
-                .to(deadLetterExchange());
+                .to(deadLetterExchange())
+                .with(HOTEL_DELETED_DLQ);
     }
     
     @Bean
     public Queue searchHistoryDeadLetterQueue() {
-        return new Queue("search.history.dlq", true);
+        return new Queue(SEARCH_HISTORY_DLQ, true);
     }
     
     @Bean
     public Binding searchHistoryDLQBinding() {
         return BindingBuilder
                 .bind(searchHistoryDeadLetterQueue())
-                .to(searchDeadLetterExchange());
+                .to(searchDeadLetterExchange())
+                .with(SEARCH_HISTORY_DLQ);
     }
     
     // Message converter

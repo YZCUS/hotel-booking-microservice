@@ -15,7 +15,5 @@ import java.util.List;
 public class GatewayApiProperties {
 
     private List<String> publicPaths = new ArrayList<>();
-    private List<String> internalServicePaths = new ArrayList<>();
-    private List<String> internalNetworkRanges = new ArrayList<>();
 
 }

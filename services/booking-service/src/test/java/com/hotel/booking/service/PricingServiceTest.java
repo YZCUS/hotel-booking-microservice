@@ -6,34 +6,20 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.web.reactive.function.client.WebClient;
 import com.hotel.booking.dto.RoomTypeResponse;
-import reactor.core.publisher.Mono;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class PricingServiceTest {
 
     @Mock
-    private WebClient.Builder webClientBuilder;
-    
-    @Mock
-    private WebClient webClient;
-    
-    @Mock
-    private WebClient.RequestHeadersUriSpec requestHeadersUriSpec;
-    
-    @Mock
-    private WebClient.ResponseSpec responseSpec;
+    private HotelCatalogClient hotelCatalogClient;
 
     @InjectMocks
     private PricingService pricingService;
@@ -44,19 +30,13 @@ class PricingServiceTest {
     void setUp() {
         roomTypeId = UUID.randomUUID();
         
-        // Setup WebClient mock chain
         RoomTypeResponse mockResponse = RoomTypeResponse.builder()
                 .id(roomTypeId)
+                .capacity(2)
                 .pricePerNight(BigDecimal.valueOf(100.00))
                 .build();
-                
-        when(webClientBuilder.build()).thenReturn(webClient);
-        when(webClientBuilder.baseUrl(nullable(String.class))).thenReturn(webClientBuilder);
-        when(webClient.get()).thenReturn(requestHeadersUriSpec);
-        when(requestHeadersUriSpec.uri(anyString(), any(UUID.class))).thenReturn(requestHeadersUriSpec);
-        when(requestHeadersUriSpec.retrieve()).thenReturn(responseSpec);
-        when(responseSpec.onStatus(any(), any())).thenReturn(responseSpec);
-        when(responseSpec.bodyToMono(RoomTypeResponse.class)).thenReturn(Mono.just(mockResponse));
+
+        when(hotelCatalogClient.getRoomType(roomTypeId)).thenReturn(mockResponse);
     }
 
     @Test

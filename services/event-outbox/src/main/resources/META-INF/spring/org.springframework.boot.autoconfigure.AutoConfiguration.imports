@@ -1,0 +1,2 @@
+com.hotel.outbox.OutboxConfiguration
+com.hotel.outbox.OutboxRelayConfiguration

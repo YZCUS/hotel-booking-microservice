@@ -24,5 +24,6 @@ public class BookingCreatedEvent implements Serializable {
     private Integer guests;
     private BigDecimal totalPrice;
     private LocalDateTime createdAt;
+    @Builder.Default
     private String eventType = "BOOKING_CREATED";
 }

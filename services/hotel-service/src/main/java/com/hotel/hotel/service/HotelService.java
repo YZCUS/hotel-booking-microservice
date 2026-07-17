@@ -2,6 +2,7 @@ package com.hotel.hotel.service;
 
 import com.hotel.hotel.dto.HotelRequest;
 import com.hotel.hotel.dto.HotelResponse;
+import com.hotel.hotel.dto.HotelExportResponse;
 import com.hotel.hotel.dto.RoomTypeResponse;
 import com.hotel.hotel.dto.SearchCriteria;
 import com.hotel.hotel.entity.Hotel;
@@ -18,14 +19,11 @@ import com.hotel.hotel.repository.UserFavoriteRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.CacheEvict;
-import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
 import java.util.*;
@@ -36,14 +34,13 @@ import java.util.stream.Collectors;
 @Slf4j
 @Transactional
 public class HotelService {
-    
+
     private final HotelRepository hotelRepository;
     private final UserFavoriteRepository favoriteRepository;
     private final RoomService roomService;
     private final RoomTypeRepository roomTypeRepository;
     private final EventPublisher eventPublisher;
-    
-    @Cacheable(value = "hotels", key = "#hotelId")
+
     public HotelResponse getHotelById(UUID hotelId) {
         log.info("Getting hotel by id: {}", hotelId);
         
@@ -52,7 +49,7 @@ public class HotelService {
         
         return mapToResponse(hotel, null);
     }
-    
+
     public HotelResponse getHotelById(UUID hotelId, UUID userId) {
         log.info("Getting hotel by id: {} for user: {}", hotelId, userId);
         
@@ -110,7 +107,7 @@ public class HotelService {
         
         Hotel saved = hotelRepository.save(hotel);
         
-        publishAfterCommit(() -> eventPublisher.publishHotelCreated(toHotelCreatedEvent(saved)));
+        eventPublisher.publishHotelCreated(toHotelCreatedEvent(saved));
         
         return mapToResponse(saved, null);
     }
@@ -134,7 +131,7 @@ public class HotelService {
         
         Hotel updated = hotelRepository.save(hotel);
         
-        publishAfterCommit(() -> eventPublisher.publishHotelUpdated(toHotelUpdatedEvent(updated)));
+        eventPublisher.publishHotelUpdated(toHotelUpdatedEvent(updated));
         
         return mapToResponse(updated, null);
     }
@@ -145,10 +142,18 @@ public class HotelService {
         
         Hotel hotel = hotelRepository.findById(hotelId)
                 .orElseThrow(() -> new HotelNotFoundException("Hotel not found"));
-        
+
+        Map<UUID, Integer> inventoryCapacities = roomTypeRepository.findByHotelId(hotelId).stream()
+                .collect(Collectors.toMap(
+                        RoomType::getId,
+                        RoomType::getTotalInventory,
+                        (first, ignored) -> first,
+                        LinkedHashMap::new));
         hotelRepository.delete(hotel);
-        publishAfterCommit(() -> eventPublisher.publishHotelDeleted(
-                HotelDeletedEvent.builder().hotelId(hotel.getId()).build()));
+        hotelRepository.flush();
+        eventPublisher.publishHotelDeleted(
+                HotelDeletedEvent.builder().hotelId(hotel.getId()).build());
+        roomService.deleteInventories(inventoryCapacities);
     }
     
     public List<String> getAllCities() {
@@ -157,6 +162,13 @@ public class HotelService {
     
     public List<String> getAllCountries() {
         return hotelRepository.findAllCountries();
+    }
+
+    @Transactional(readOnly = true)
+    public List<HotelExportResponse> exportHotels() {
+        return hotelRepository.findAll().stream()
+                .map(this::mapToExportResponse)
+                .toList();
     }
     
     private Specification<Hotel> buildSearchSpecification(SearchCriteria criteria) {
@@ -206,7 +218,7 @@ public class HotelService {
 
         List<RoomTypeResponse> roomTypes = hotel.getRoomTypes() != null ?
                 hotel.getRoomTypes().stream()
-                        .map(roomType -> roomService.mapToResponse(roomType, availabilityMap.getOrDefault(roomType.getId(), 0)))
+                        .map(roomType -> roomService.mapToResponse(roomType, availabilityMap.get(roomType.getId())))
                         .collect(Collectors.toList()) : Collections.emptyList();
         
         // Calculate price range
@@ -267,23 +279,38 @@ public class HotelService {
                 .isAvailable(roomType.getTotalInventory() > 0)
                 .build();
     }
-    
-    private void publishAfterCommit(Runnable publisher) {
-        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            publisher.run();
-            return;
-        }
 
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                try {
-                    publisher.run();
-                } catch (Exception e) {
-                    log.error("Failed to publish hotel event after commit", e);
-                }
-            }
-        });
+    private HotelExportResponse mapToExportResponse(Hotel hotel) {
+        HotelResponse response = mapToResponse(hotel, null);
+        List<RoomTypeResponse> rooms = response.getRoomTypes();
+        int totalRooms = rooms.stream()
+                .mapToInt(room -> room.getTotalInventory() == null ? 0 : room.getTotalInventory())
+                .sum();
+        Integer availableRooms = rooms.stream().anyMatch(room -> room.getAvailableRooms() == null)
+                ? null
+                : rooms.stream().mapToInt(RoomTypeResponse::getAvailableRooms).sum();
+
+        return HotelExportResponse.builder()
+                .id(response.getId())
+                .name(response.getName())
+                .description(response.getDescription())
+                .city(response.getCity())
+                .country(response.getCountry())
+                .address(response.getAddress())
+                .starRating(response.getStarRating())
+                .minPrice(response.getMinPrice())
+                .maxPrice(response.getMaxPrice())
+                .amenities(response.getAmenities())
+                .latitude(toDouble(response.getLatitude()))
+                .longitude(toDouble(response.getLongitude()))
+                .imageUrls(List.of())
+                .totalRooms(totalRooms)
+                .availableRooms(availableRooms)
+                .averageRating(null)
+                .reviewCount(null)
+                .isActive(true)
+                .roomTypes(rooms)
+                .build();
     }
 
     private HotelCreatedEvent toHotelCreatedEvent(Hotel hotel) {

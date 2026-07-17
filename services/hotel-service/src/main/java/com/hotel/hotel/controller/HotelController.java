@@ -2,6 +2,7 @@ package com.hotel.hotel.controller;
 
 import com.hotel.hotel.dto.HotelRequest;
 import com.hotel.hotel.dto.HotelResponse;
+import com.hotel.hotel.dto.HotelExportResponse;
 import com.hotel.hotel.dto.RoomTypeRequest;
 import com.hotel.hotel.dto.RoomTypeResponse;
 import com.hotel.hotel.dto.SearchCriteria;
@@ -17,6 +18,8 @@ import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -31,6 +34,12 @@ public class HotelController {
     
     private final HotelService hotelService;
     private final RoomService roomService;
+
+    @GetMapping("/export")
+    @PreAuthorize("hasRole('INTERNAL_SEARCH')")
+    public ResponseEntity<List<HotelExportResponse>> exportHotels() {
+        return ResponseEntity.ok(hotelService.exportHotels());
+    }
     
     @GetMapping
     public ResponseEntity<Page<HotelResponse>> searchHotels(
@@ -152,6 +161,11 @@ public class HotelController {
         RoomTypeResponse room = roomService.getRoomTypeById(roomTypeId);
         return ResponseEntity.ok(room);
     }
+
+    @GetMapping("/rooms/{roomTypeId}/catalog")
+    public ResponseEntity<RoomTypeResponse> getRoomTypeCatalog(@PathVariable UUID roomTypeId) {
+        return ResponseEntity.ok(roomService.getRoomTypeCatalog(roomTypeId));
+    }
     
     @GetMapping("/cities")
     public ResponseEntity<List<String>> getCities() {
@@ -167,9 +181,10 @@ public class HotelController {
     
     private UUID extractUserIdFromRequest(HttpServletRequest request) {
         try {
-            String userIdHeader = request.getHeader("X-User-Id");
-            if (userIdHeader != null && !userIdHeader.trim().isEmpty()) {
-                return UUID.fromString(userIdHeader);
+            Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+            if (authentication != null && authentication.isAuthenticated()
+                    && authentication.getPrincipal() != null) {
+                return UUID.fromString(authentication.getPrincipal().toString());
             }
             return null;
         } catch (Exception e) {

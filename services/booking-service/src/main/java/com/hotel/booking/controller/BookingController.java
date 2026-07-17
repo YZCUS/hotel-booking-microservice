@@ -13,6 +13,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 import java.util.UUID;
 
@@ -20,6 +21,7 @@ import java.util.UUID;
 @RequestMapping("/api/v1/bookings")
 @RequiredArgsConstructor
 @Slf4j
+@PreAuthorize("hasRole('GATEWAY')")
 public class BookingController {
     
     private final BookingService bookingService;
@@ -27,6 +29,7 @@ public class BookingController {
     @PostMapping
     public ResponseEntity<BookingResponse> createBooking(
             @RequestHeader("X-User-Id") UUID authenticatedUserId,
+            @RequestHeader("Idempotency-Key") String idempotencyKey,
             @Valid @RequestBody BookingRequest request) {
         
         // Verify that users can only create bookings for themselves
@@ -36,7 +39,7 @@ public class BookingController {
         }
         
         log.info("Creating booking for user: {}", request.getUserId());
-        BookingResponse response = bookingService.createBooking(request);
+        BookingResponse response = bookingService.createBooking(request, idempotencyKey);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
     

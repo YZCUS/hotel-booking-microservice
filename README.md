@@ -73,7 +73,7 @@ make health
 6. Create a booking.
 7. Cancel it while it is still outside the 24-hour cancellation window.
 
-The seeded room inventory is initialized for the next 30 days from database bootstrap. Pick dates inside that range for the most reliable demo.
+The seeded room inventory is initialized for the next 395 days from database bootstrap. Pick dates inside that range for the most reliable demo.
 
 ## Local Backend Commands
 
@@ -122,6 +122,7 @@ Create booking:
 curl -X POST http://localhost:8080/api/v1/bookings \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <jwt>" \
+  -H "Idempotency-Key: <stable-unique-key>" \
   -d '{"userId":"<user-id>","roomTypeId":"660e8400-e29b-41d4-a716-446655440001","checkInDate":"2026-05-17","checkOutDate":"2026-05-19","guests":2}'
 ```
 
