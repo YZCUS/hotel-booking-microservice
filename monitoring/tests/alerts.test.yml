@@ -1,0 +1,239 @@
+---
+rule_files:
+- "../rules/service-alerts.yml"
+evaluation_interval: 15s
+tests:
+- name: unreachable target waits, fires and resolves
+  interval: 30s
+  input_series:
+  - series: up{job="search-service",instance="search-service:9004"}
+    values: 1 0+0x4 1+0x3
+  alert_rule_test:
+  - eval_time: 1m
+    alertname: ServiceDown
+    exp_alerts: []
+  - eval_time: 1m30s
+    alertname: ServiceDown
+    exp_alerts:
+    - exp_labels:
+        job: search-service
+        instance: search-service:9004
+        severity: critical
+      exp_annotations:
+        summary: search-service metrics endpoint is unreachable
+        description: Scraping has failed for one minute. Check the container, network
+          and metrics endpoint.
+  - eval_time: 3m
+    alertname: ServiceDown
+    exp_alerts: []
+- name: postgres backend failure despite healthy exporter
+  interval: 30s
+  input_series:
+  - series: up{job="postgres",instance="exporter"}
+    values: 1+0x10
+  - series: pg_up{job="postgres",instance="exporter"}
+    values: 1 0+0x4 1+0x3
+  alert_rule_test:
+  - eval_time: 1m
+    alertname: BackendUnavailable
+    exp_alerts: []
+  - eval_time: 1m30s
+    alertname: BackendUnavailable
+    exp_alerts:
+    - exp_labels:
+        job: postgres
+        instance: exporter
+        severity: critical
+      exp_annotations:
+        description: The exporter is reachable but cannot reach its backend. Check
+          backend health and credentials.
+        summary: postgres backend is unavailable
+  - eval_time: 3m
+    alertname: BackendUnavailable
+    exp_alerts: []
+  - eval_time: 1m30s
+    alertname: ServiceDown
+    exp_alerts: []
+- name: redis backend failure despite healthy exporter
+  interval: 30s
+  input_series:
+  - series: up{job="redis",instance="exporter"}
+    values: 1+0x10
+  - series: redis_up{job="redis",instance="exporter"}
+    values: 1 0+0x4 1+0x3
+  alert_rule_test:
+  - eval_time: 1m
+    alertname: BackendUnavailable
+    exp_alerts: []
+  - eval_time: 1m30s
+    alertname: BackendUnavailable
+    exp_alerts:
+    - exp_labels:
+        job: redis
+        instance: exporter
+        severity: critical
+      exp_annotations:
+        description: The exporter is reachable but cannot reach its backend. Check
+          backend health and credentials.
+        summary: redis backend is unavailable
+  - eval_time: 3m
+    alertname: BackendUnavailable
+    exp_alerts: []
+  - eval_time: 1m30s
+    alertname: ServiceDown
+    exp_alerts: []
+- name: frontend backend failure despite healthy exporter
+  interval: 30s
+  input_series:
+  - series: up{job="frontend",instance="exporter"}
+    values: 1+0x10
+  - series: nginx_up{job="frontend",instance="exporter"}
+    values: 1 0+0x4 1+0x3
+  alert_rule_test:
+  - eval_time: 1m
+    alertname: BackendUnavailable
+    exp_alerts: []
+  - eval_time: 1m30s
+    alertname: BackendUnavailable
+    exp_alerts:
+    - exp_labels:
+        job: frontend
+        instance: exporter
+        severity: critical
+      exp_annotations:
+        description: The exporter is reachable but cannot reach its backend. Check
+          backend health and credentials.
+        summary: frontend backend is unavailable
+  - eval_time: 3m
+    alertname: BackendUnavailable
+    exp_alerts: []
+  - eval_time: 1m30s
+    alertname: ServiceDown
+    exp_alerts: []
+- name: sustained 10 percent errors fire then recover
+  interval: 30s
+  input_series:
+  - series: spring_cloud_gateway_requests_seconds_count{job="api-gateway",httpStatusCode="500",routeId="hotel-service"}
+    values: 0+10x8 80+0x10
+  - series: spring_cloud_gateway_requests_seconds_count{job="api-gateway",httpStatusCode="200",routeId="hotel-service"}
+    values: 0+90x8 820+100x10
+  alert_rule_test:
+  - eval_time: 1m
+    alertname: HighHttpErrorRate
+    exp_alerts: []
+  - eval_time: 2m
+    alertname: HighHttpErrorRate
+    exp_alerts:
+    - exp_labels:
+        job: api-gateway
+        severity: warning
+      exp_annotations:
+        summary: api-gateway HTTP 5xx rate is above 5%
+        description: The two-minute 5xx ratio exceeded 5% for one minute, with more
+          than six requests per minute. Health checks are excluded.
+  - eval_time: 7m
+    alertname: HighHttpErrorRate
+    exp_alerts: []
+- name: zero traffic
+  interval: 30s
+  input_series:
+  - series: spring_cloud_gateway_requests_seconds_count{job="api-gateway",httpStatusCode="500",routeId="hotel-service"}
+    values: 0+0x14
+  - series: spring_cloud_gateway_requests_seconds_count{job="api-gateway",httpStatusCode="200",routeId="hotel-service"}
+    values: 0+0x14
+  alert_rule_test:
+  - eval_time: 5m
+    alertname: ServiceDown
+    exp_alerts: []
+  - eval_time: 5m
+    alertname: BackendUnavailable
+    exp_alerts: []
+  - eval_time: 5m
+    alertname: HighHttpErrorRate
+    exp_alerts: []
+- name: low traffic
+  interval: 30s
+  input_series:
+  - series: spring_cloud_gateway_requests_seconds_count{job="api-gateway",httpStatusCode="500",routeId="hotel-service"}
+    values: 0+1x14
+  alert_rule_test:
+  - eval_time: 5m
+    alertname: ServiceDown
+    exp_alerts: []
+  - eval_time: 5m
+    alertname: BackendUnavailable
+    exp_alerts: []
+  - eval_time: 5m
+    alertname: HighHttpErrorRate
+    exp_alerts: []
+- name: health failures excluded
+  interval: 30s
+  input_series:
+  - series: spring_cloud_gateway_requests_seconds_count{job="api-gateway",httpStatusCode="503",routeId="gateway-health"}
+    values: 0+100x14
+  - series: spring_cloud_gateway_requests_seconds_count{job="api-gateway",httpStatusCode="500",routeId="gateway-health"}
+    values: 0+100x14
+  - series: spring_cloud_gateway_requests_seconds_count{job="api-gateway",httpStatusCode="200",routeId="hotel-service"}
+    values: 0+10x14
+  alert_rule_test:
+  - eval_time: 5m
+    alertname: ServiceDown
+    exp_alerts: []
+  - eval_time: 5m
+    alertname: BackendUnavailable
+    exp_alerts: []
+  - eval_time: 5m
+    alertname: HighHttpErrorRate
+    exp_alerts: []
+- name: healthy traffic without 5xx series
+  interval: 30s
+  input_series:
+  - series: spring_cloud_gateway_requests_seconds_count{job="api-gateway",httpStatusCode="200",routeId="hotel-service"}
+    values: 0+100x14
+  alert_rule_test:
+  - eval_time: 5m
+    alertname: ServiceDown
+    exp_alerts: []
+  - eval_time: 5m
+    alertname: BackendUnavailable
+    exp_alerts: []
+  - eval_time: 5m
+    alertname: HighHttpErrorRate
+    exp_alerts: []
+- name: missing series
+  interval: 30s
+  input_series: []
+  alert_rule_test:
+  - eval_time: 5m
+    alertname: ServiceDown
+    exp_alerts: []
+  - eval_time: 5m
+    alertname: BackendUnavailable
+    exp_alerts: []
+  - eval_time: 5m
+    alertname: HighHttpErrorRate
+    exp_alerts: []
+- name: servlet service error ratio fires and recovers
+  interval: 30s
+  input_series:
+  - series: http_server_requests_seconds_count{job="hotel-service",status="500",uri="/api/v1/hotels"}
+    values: 0+10x8 80+0x10
+  - series: http_server_requests_seconds_count{job="hotel-service",status="200",uri="/api/v1/hotels"}
+    values: 0+90x8 820+100x10
+  alert_rule_test:
+  - eval_time: 1m
+    alertname: HighHttpErrorRate
+    exp_alerts: []
+  - eval_time: 2m
+    alertname: HighHttpErrorRate
+    exp_alerts:
+    - exp_labels:
+        job: hotel-service
+        severity: warning
+      exp_annotations:
+        summary: hotel-service HTTP 5xx rate is above 5%
+        description: The two-minute 5xx ratio exceeded 5% for one minute, with more
+          than six requests per minute. Health checks are excluded.
+  - eval_time: 7m
+    alertname: HighHttpErrorRate
+    exp_alerts: []

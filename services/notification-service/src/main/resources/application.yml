@@ -38,17 +38,26 @@ spring:
           write-timeout: 25000
 
 management:
+  server:
+    port: 9005
+    address: ${MANAGEMENT_SERVER_ADDRESS:127.0.0.1}
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus
+        include: health,prometheus
   endpoint:
     health:
       show-details: when-authorized
+      group:
+        application:
+          include: "*"
+          additional-path: "server:/healthz"
   metrics:
-    export:
-      prometheus:
-        enabled: true
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
 
 logging:
   level:

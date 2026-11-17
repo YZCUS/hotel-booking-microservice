@@ -99,20 +99,30 @@ rate-limit:
 
 # Actuator Configuration
 management:
+  server:
+    port: 9000
+    address: ${MANAGEMENT_SERVER_ADDRESS:127.0.0.1}
   endpoints:
     web:
       exposure:
-        include: health
+        include: health,prometheus
   endpoint:
     health:
       show-details: when-authorized
       show-components: always
+      group:
+        application:
+          include: "*"
+          additional-path: "server:/healthz"
     gateway:
       enabled: false
   metrics:
-    export:
-      prometheus:
-        enabled: true
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+        spring.cloud.gateway.requests: true
 
 # Logging Configuration
 logging:
@@ -138,4 +148,5 @@ gateway:
       - /health/**
       - /actuator/health
       - /actuator/health/**
+      - /healthz
       - /fallback/**

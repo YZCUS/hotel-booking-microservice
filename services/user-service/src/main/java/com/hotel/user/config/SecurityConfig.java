@@ -4,6 +4,8 @@ import com.hotel.user.security.JwtAuthenticationEntryPoint;
 import com.hotel.user.security.JwtAuthenticationFilter;
 import com.hotel.user.security.InternalServiceAuthenticationFilter;
 import lombok.RequiredArgsConstructor;
+import org.springframework.boot.actuate.autoconfigure.security.servlet.EndpointRequest;
+import org.springframework.http.HttpMethod;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -36,15 +38,16 @@ public class SecurityConfig {
         http.csrf(AbstractHttpConfigurer::disable)
                 .authorizeHttpRequests(authz -> authz
                         .requestMatchers("/api/v1/auth/**").permitAll()
-                        .requestMatchers("/actuator/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/healthz").permitAll()
+                        .requestMatchers(EndpointRequest.to("health", "prometheus")).permitAll()
                         .anyRequest().authenticated()
                 )
                 .exceptionHandling(ex -> ex.authenticationEntryPoint(jwtAuthenticationEntryPoint))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
         
         // Add internal service filter before JWT filter to handle internal authentication first
-        http.addFilterBefore(internalServiceAuthenticationFilter, JwtAuthenticationFilter.class);
         http.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+        http.addFilterBefore(internalServiceAuthenticationFilter, JwtAuthenticationFilter.class);
         
         return http.build();
     }

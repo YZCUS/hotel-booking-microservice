@@ -266,7 +266,19 @@ services:
       VITE_API_BASE_URL: ${PUBLIC_API_BASE_URL:-/api/v1}
 
   # Monitoring - Production configuration
+  postgres-exporter:
+    environment:
+      DATA_SOURCE_URI: postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?sslmode=disable
+      DATA_SOURCE_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      DATA_SOURCE_PASS: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+
+  redis-exporter:
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+
   prometheus:
+    environment:
+      MEILISEARCH_METRICS_KEY: ${MEILISEARCH_METRICS_KEY:?MEILISEARCH_METRICS_KEY with metrics.get permission is required}
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
@@ -288,7 +300,6 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is required}
-      GF_INSTALL_PLUGINS: grafana-piechart-panel
       GF_SECURITY_ALLOW_EMBEDDING: true
     deploy:
       resources:

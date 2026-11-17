@@ -1,9 +1,15 @@
-FROM openjdk:21-jdk-slim
+FROM eclipse-temurin:21-jre-jammy
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-COPY build/libs/search-service-*.jar app.jar
+COPY build/libs/search-service-1.0.0.jar app.jar
 
-EXPOSE 8084
+EXPOSE 8084 9004
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8084/healthz || exit 1
 
 ENTRYPOINT ["java", "-jar", "app.jar"]
