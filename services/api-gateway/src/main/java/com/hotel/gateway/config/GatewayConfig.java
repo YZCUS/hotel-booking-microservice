@@ -99,29 +99,33 @@ public class GatewayConfig {
                 .uri(searchServiceUrl))
             
             // Health check routes
+            .route("gateway-health", r -> r
+                .path("/actuator/health")
+                .uri("forward:/healthz"))
+
             .route("user-service-health", r -> r
                 .path("/health/user-service")
-                .filters(f -> f.rewritePath("/health/user-service", "/actuator/health"))
+                .filters(f -> f.rewritePath("/health/user-service", "/healthz"))
                 .uri(userServiceUrl))
             
             .route("hotel-service-health", r -> r
                 .path("/health/hotel-service")
-                .filters(f -> f.rewritePath("/health/hotel-service", "/actuator/health"))
+                .filters(f -> f.rewritePath("/health/hotel-service", "/healthz"))
                 .uri(hotelServiceUrl))
             
             .route("booking-service-health", r -> r
                 .path("/health/booking-service")
-                .filters(f -> f.rewritePath("/health/booking-service", "/actuator/health"))
+                .filters(f -> f.rewritePath("/health/booking-service", "/healthz"))
                 .uri(bookingServiceUrl))
             
             .route("search-service-health", r -> r
                 .path("/health/search-service")
-                .filters(f -> f.rewritePath("/health/search-service", "/actuator/health"))
+                .filters(f -> f.rewritePath("/health/search-service", "/healthz"))
                 .uri(searchServiceUrl))
 
             .route("notification-service-health", r -> r
                 .path("/health/notification-service")
-                .filters(f -> f.rewritePath("/health/notification-service", "/actuator/health"))
+                .filters(f -> f.rewritePath("/health/notification-service", "/healthz"))
                 .uri(notificationServiceUrl))
             
             .build();

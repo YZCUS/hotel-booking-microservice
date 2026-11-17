@@ -7,8 +7,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.boot.test.web.server.LocalManagementPort;
 import org.springframework.cloud.gateway.route.RouteLocator;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.data.redis.core.ReactiveValueOperations;
@@ -30,11 +32,13 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+@AutoConfigureObservability
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "spring.security.jwt.secret=gateway-test-secret-key-with-more-than-64-characters-1234567890abcdef",
         "services.user-service.url=http://127.0.0.1:1",
         "spring.data.redis.password=test",
         "management.health.redis.enabled=false",
+        "management.server.port=0",
         "app.internal.service-secret=test-internal-secret"
 })
 class GatewaySecurityIntegrationTest {
@@ -44,6 +48,9 @@ class GatewaySecurityIntegrationTest {
 
     @LocalServerPort
     private int port;
+
+    @LocalManagementPort
+    private int managementPort;
 
     @MockBean
     private ReactiveRedisTemplate<String, String> redisTemplate;
@@ -104,6 +111,27 @@ class GatewaySecurityIntegrationTest {
         webTestClient.delete()
                 .uri("/actuator/gateway/routes/should-not-exist")
                 .exchange()
+                .expectStatus().isNotFound();
+    }
+
+    @Test
+    void prometheusIsOnlyAvailableOnTheManagementPort() {
+        webTestClient.get().uri("/healthz").exchange().expectStatus().isOk();
+        webTestClient.get().uri("/actuator/prometheus").exchange().expectStatus().isNotFound();
+
+        WebTestClient managementClient = WebTestClient.bindToServer()
+                .baseUrl("http://localhost:" + managementPort).build();
+        managementClient.get().uri("/actuator/prometheus").exchange()
+                .expectStatus().isOk()
+                .expectBody(String.class).value(body -> {
+                    assertTrue(body.contains("jvm_memory_used_bytes"));
+                    assertTrue(body.contains("http_server_requests_seconds_count"));
+                    assertTrue(body.contains("http_server_requests_seconds_bucket"));
+                    assertTrue(body.contains("application=\"api-gateway\""));
+                });
+        managementClient.get().uri("/actuator/gateway/routes").exchange()
+                .expectStatus().isNotFound();
+        managementClient.get().uri("/actuator/env").exchange()
                 .expectStatus().isNotFound();
     }
 

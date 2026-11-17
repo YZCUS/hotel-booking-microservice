@@ -2,6 +2,7 @@ package com.hotel.hotel.config;
 
 import com.hotel.hotel.security.TrustedHeaderAuthenticationFilter;
 import lombok.RequiredArgsConstructor;
+import org.springframework.boot.actuate.autoconfigure.security.servlet.EndpointRequest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -27,7 +28,8 @@ public class SecurityConfig {
                 .formLogin(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/actuator/health", "/actuator/info").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/healthz").permitAll()
+                        .requestMatchers(EndpointRequest.to("health", "prometheus")).permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/hotels/**").permitAll()
                         .requestMatchers("/api/v1/favorites/**").hasRole("GATEWAY")
                         .anyRequest().authenticated())

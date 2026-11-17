@@ -48,6 +48,7 @@ services:
       RABBITMQ_DEFAULT_VHOST: /
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
+      - ./monitoring/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
     networks:
       - hotel-network
     healthcheck:
@@ -66,6 +67,7 @@ services:
       MEILI_NO_ANALYTICS: true
       MEILI_MASTER_KEY: masterKey123456789
       MEILI_HTTP_ADDR: 0.0.0.0:7700
+      MEILI_EXPERIMENTAL_ENABLE_METRICS: true
     volumes:
       - meilisearch_data:/meili_data
     networks:
@@ -85,6 +87,7 @@ services:
     container_name: hotel-user-service
     environment:
       SPRING_PROFILES_ACTIVE: docker
+      MANAGEMENT_SERVER_ADDRESS: 0.0.0.0
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/hotel_reservation
       SPRING_DATASOURCE_USERNAME: hotel_user
       SPRING_DATASOURCE_PASSWORD: hotel_password
@@ -110,7 +113,7 @@ services:
       - hotel-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/actuator/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8081/healthz"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -124,6 +127,7 @@ services:
     container_name: hotel-hotel-service
     environment:
       SPRING_PROFILES_ACTIVE: docker
+      MANAGEMENT_SERVER_ADDRESS: 0.0.0.0
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/hotel_reservation
       SPRING_DATASOURCE_USERNAME: hotel_user
       SPRING_DATASOURCE_PASSWORD: hotel_password
@@ -149,7 +153,7 @@ services:
       - hotel-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8082/actuator/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8082/healthz"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -163,6 +167,7 @@ services:
     container_name: hotel-booking-service
     environment:
       SPRING_PROFILES_ACTIVE: docker
+      MANAGEMENT_SERVER_ADDRESS: 0.0.0.0
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/hotel_reservation
       SPRING_DATASOURCE_USERNAME: hotel_user
       SPRING_DATASOURCE_PASSWORD: hotel_password
@@ -188,7 +193,7 @@ services:
       - hotel-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8083/actuator/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8083/healthz"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -202,6 +207,7 @@ services:
     container_name: hotel-search-service
     environment:
       SPRING_PROFILES_ACTIVE: docker
+      MANAGEMENT_SERVER_ADDRESS: 0.0.0.0
       MEILISEARCH_HOST: http://meilisearch:7700
       MEILISEARCH_API_KEY: masterKey123456789
       HOTEL_SERVICE_URL: http://hotel-service:8082
@@ -219,7 +225,7 @@ services:
       - hotel-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8084/actuator/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8084/healthz"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -233,6 +239,7 @@ services:
     container_name: hotel-notification-service
     environment:
       SPRING_PROFILES_ACTIVE: docker
+      MANAGEMENT_SERVER_ADDRESS: 0.0.0.0
       SPRING_RABBITMQ_HOST: rabbitmq
       SPRING_RABBITMQ_PORT: 5672
       SPRING_RABBITMQ_USERNAME: hotel_user
@@ -252,7 +259,7 @@ services:
       - hotel-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8085/actuator/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8085/healthz"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -268,6 +275,7 @@ services:
       - "8080:8080"
     environment:
       SPRING_PROFILES_ACTIVE: docker
+      MANAGEMENT_SERVER_ADDRESS: 0.0.0.0
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
       SPRING_DATA_REDIS_PASSWORD: hotel_redis_pass
@@ -296,7 +304,7 @@ services:
       - hotel-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -323,12 +331,20 @@ services:
 
   # Monitoring & Management
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.16.0
     container_name: hotel-prometheus
+    environment:
+      MEILISEARCH_METRICS_KEY: ${MEILISEARCH_METRICS_KEY:-masterKey123456789}
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - 'umask 077; printf "%s" "$$MEILISEARCH_METRICS_KEY" > /tmp/meilisearch-metrics-key; exec /bin/prometheus "$$@"'
+      - --
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/rules:/etc/prometheus/rules:ro
       - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -342,18 +358,53 @@ services:
     restart: unless-stopped
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:13.3.1
     container_name: hotel-grafana
     ports:
-      - "3001:3000"
+      - "127.0.0.1:3001:3000"
     environment:
       GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin123
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin123}
+      GF_METRICS_ENABLED: true
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
     networks:
       - hotel-network
+    restart: unless-stopped
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.20.1
+    environment:
+      DATA_SOURCE_URI: postgres:5432/hotel_reservation?sslmode=disable
+      DATA_SOURCE_USER: hotel_user
+      DATA_SOURCE_PASS: hotel_password
+    networks: [hotel-network]
+    restart: unless-stopped
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.97.0
+    environment:
+      REDIS_ADDR: redis://redis:6379
+      REDIS_PASSWORD: hotel_redis_pass
+    networks: [hotel-network]
+    restart: unless-stopped
+
+  nginx-exporter:
+    image: nginx/nginx-prometheus-exporter:1.5.3
+    command: ['--nginx.scrape-uri=http://frontend:8086/stub_status']
+    networks: [hotel-network]
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.35.0
+    ports: ["127.0.0.1:9093:9093"]
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    command: ['--config.file=/etc/alertmanager/alertmanager.yml', '--storage.path=/alertmanager', '--cluster.listen-address=']
+    networks: [hotel-network]
     restart: unless-stopped
 
 networks:
@@ -375,4 +426,6 @@ volumes:
   prometheus_data:
     driver: local
   grafana_data:
+    driver: local
+  alertmanager_data:
     driver: local

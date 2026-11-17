@@ -20,7 +20,7 @@ import java.util.concurrent.ExecutionException;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.when;
 
-@SpringBootTest
+@SpringBootTest(properties = "management.server.port=0")
 @ActiveProfiles("test")
 class OptimisticLockingIntegrationTest {
 

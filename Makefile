@@ -171,8 +171,8 @@ health:
 # Monitoring
 monitoring-up:
 	@echo "📊 Starting monitoring services..."
-	docker-compose up -d prometheus grafana
+	docker-compose up -d prometheus grafana alertmanager postgres-exporter redis-exporter nginx-exporter
 
 monitoring-down:
 	@echo "📊 Stopping monitoring services..."
-	docker-compose stop prometheus grafana
+	docker-compose stop prometheus grafana alertmanager postgres-exporter redis-exporter nginx-exporter

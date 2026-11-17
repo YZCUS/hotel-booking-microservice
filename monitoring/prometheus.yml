@@ -3,74 +3,82 @@ global:
   evaluation_interval: 15s
 
 rule_files:
-  # - "first_rules.yml"
-  # - "second_rules.yml"
+  - /etc/prometheus/rules/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
 
 scrape_configs:
-  # Prometheus itself
-  - job_name: 'prometheus'
+  - job_name: prometheus
+    metrics_path: /metrics
     static_configs:
       - targets: ['localhost:9090']
 
-  # API Gateway
-  - job_name: 'api-gateway'
-    metrics_path: '/actuator/prometheus'
+  - job_name: api-gateway
+    metrics_path: /actuator/prometheus
     static_configs:
-      - targets: ['api-gateway:8080']
-    scrape_interval: 10s
+      - targets: ['api-gateway:9000']
 
-  # User Service
-  - job_name: 'user-service'
-    metrics_path: '/actuator/prometheus'
+  - job_name: user-service
+    metrics_path: /actuator/prometheus
     static_configs:
-      - targets: ['user-service:8081']
-    scrape_interval: 15s
+      - targets: ['user-service:9001']
 
-  # Hotel Service
-  - job_name: 'hotel-service'
-    metrics_path: '/actuator/prometheus'
+  - job_name: hotel-service
+    metrics_path: /actuator/prometheus
     static_configs:
-      - targets: ['hotel-service:8082']
-    scrape_interval: 15s
+      - targets: ['hotel-service:9002']
 
-  # Booking Service
-  - job_name: 'booking-service'
-    metrics_path: '/actuator/prometheus'
+  - job_name: booking-service
+    metrics_path: /actuator/prometheus
     static_configs:
-      - targets: ['booking-service:8083']
-    scrape_interval: 15s
+      - targets: ['booking-service:9003']
 
-  # Search Service
-  - job_name: 'search-service'
-    metrics_path: '/actuator/prometheus'
+  - job_name: search-service
+    metrics_path: /actuator/prometheus
     static_configs:
-      - targets: ['search-service:8084']
-    scrape_interval: 15s
+      - targets: ['search-service:9004']
 
-  # Notification Service
-  - job_name: 'notification-service'
-    metrics_path: '/actuator/prometheus'
+  - job_name: notification-service
+    metrics_path: /actuator/prometheus
     static_configs:
-      - targets: ['notification-service:8085']
-    scrape_interval: 15s
+      - targets: ['notification-service:9005']
 
-  # Infrastructure services
-  - job_name: 'postgres'
+  - job_name: postgres
+    metrics_path: /metrics
     static_configs:
-      - targets: ['postgres:5432']
-    scrape_interval: 30s
+      - targets: ['postgres-exporter:9187']
 
-  - job_name: 'redis'
+  - job_name: redis
+    metrics_path: /metrics
     static_configs:
-      - targets: ['redis:6379']
-    scrape_interval: 30s
+      - targets: ['redis-exporter:9121']
 
-  - job_name: 'rabbitmq'
+  - job_name: rabbitmq
+    metrics_path: /metrics
     static_configs:
-      - targets: ['rabbitmq:15692']  # RabbitMQ Prometheus metrics port
-    scrape_interval: 30s
+      - targets: ['rabbitmq:15692']
 
-  - job_name: 'meilisearch'
+  - job_name: meilisearch
+    metrics_path: /metrics
+    authorization:
+      credentials_file: /tmp/meilisearch-metrics-key
     static_configs:
       - targets: ['meilisearch:7700']
-    scrape_interval: 30s
+
+  - job_name: frontend
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['nginx-exporter:9113']
+
+  - job_name: grafana
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['grafana:3000']
+
+  - job_name: alertmanager
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['alertmanager:9093']

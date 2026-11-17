@@ -1,0 +1,11 @@
+route:
+  receiver: local-ui
+  group_by: ['alertname', 'job']
+  group_wait: 10s
+  group_interval: 30s
+  repeat_interval: 4h
+
+# Active alerts are visible in Alertmanager. Add your own webhook/email receiver
+# for external delivery; never commit real endpoints or credentials here.
+receivers:
+  - name: local-ui

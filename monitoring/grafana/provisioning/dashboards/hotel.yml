@@ -1,0 +1,9 @@
+apiVersion: 1
+providers:
+  - name: hotel-platform
+    folder: Hotel Platform
+    type: file
+    disableDeletion: false
+    editable: false
+    options:
+      path: /var/lib/grafana/dashboards

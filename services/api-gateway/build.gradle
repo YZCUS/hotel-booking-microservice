@@ -22,6 +22,7 @@ dependencies {
         exclude group: 'org.springframework.boot', module: 'spring-boot-starter-web'
     }
     implementation 'org.springframework.cloud:spring-cloud-starter-circuitbreaker-reactor-resilience4j'
+    runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
     
     // Reactive only - Gateway includes WebFlux already
     implementation 'org.springframework.security:spring-security-web'
@@ -50,6 +51,8 @@ dependencies {
 dependencyManagement {
     imports {
         mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
+        // 2.2.0 fixes automatic circuit-breaker recovery (Resilience4j issue #2038).
+        mavenBom 'io.github.resilience4j:resilience4j-bom:2.2.0'
     }
 }
 

@@ -1,5 +1,6 @@
 package com.hotel.user.config;
 
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.cache.RedisCacheConfiguration;
@@ -24,8 +25,8 @@ public class RedisConfig {
         template.setHashKeySerializer(new StringRedisSerializer());
         
         // Use JSON serializer for values
-        template.setValueSerializer(new GenericJackson2JsonRedisSerializer());
-        template.setHashValueSerializer(new GenericJackson2JsonRedisSerializer());
+        template.setValueSerializer(jsonSerializer());
+        template.setHashValueSerializer(jsonSerializer());
         
         template.afterPropertiesSet();
         return template;
@@ -40,10 +41,15 @@ public class RedisConfig {
                         .fromSerializer(new StringRedisSerializer()))
                 .serializeValuesWith(
                     org.springframework.data.redis.serializer.RedisSerializationContext.SerializationPair
-                        .fromSerializer(new GenericJackson2JsonRedisSerializer()));
+                        .fromSerializer(jsonSerializer()));
         
         return RedisCacheManager.builder(connectionFactory)
                 .cacheDefaults(cacheConfig)
                 .build();
+    }
+
+    private GenericJackson2JsonRedisSerializer jsonSerializer() {
+        return new GenericJackson2JsonRedisSerializer()
+                .configure(mapper -> mapper.registerModule(new JavaTimeModule()));
     }
 }

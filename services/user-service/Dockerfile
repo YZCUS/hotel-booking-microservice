@@ -1,12 +1,15 @@
-FROM openjdk:21-jdk-slim
+FROM eclipse-temurin:21-jre-jammy
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-COPY build/libs/user-service-*.jar app.jar
+COPY build/libs/user-service-1.0.0.jar app.jar
 
-EXPOSE 8081
+EXPOSE 8081 9001
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8081/actuator/health || exit 1
+    CMD curl -f http://localhost:8081/healthz || exit 1
 
-ENTRYPOINT ["java", "-Dspring.profiles.active=docker", "-jar", "app.jar"]
+ENTRYPOINT ["java", "-jar", "app.jar"]
