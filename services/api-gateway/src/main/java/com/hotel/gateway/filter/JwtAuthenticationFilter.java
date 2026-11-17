@@ -4,6 +4,7 @@ import com.hotel.gateway.config.GatewayApiProperties;
 import com.hotel.gateway.handler.GatewayErrorResponder;
 import com.hotel.gateway.util.InternalServiceTokenProvider;
 import com.hotel.gateway.util.JwtUtil;
+import io.jsonwebtoken.Claims;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
@@ -68,10 +69,11 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         }
         
         try {
-            if (jwtUtil.validateToken(token)) {
-                String userId = jwtUtil.extractUserId(token);
-                String email = jwtUtil.extractEmail(token);
-                String role = jwtUtil.extractRole(token);
+            Claims claims = jwtUtil.parseValidatedClaims(token);
+            if (claims != null) {
+                String userId = claims.get("userId", String.class);
+                String email = claims.getSubject();
+                String role = claims.get("role", String.class);
 
                 if (userId == null || userId.isBlank() || email == null || email.isBlank()
                         || role == null || role.isBlank()) {

@@ -137,7 +137,7 @@ class BookingServiceTest {
         verify(inventoryService).reserveInventory(roomTypeId, bookingRequest.getCheckInDate(), 
                 bookingRequest.getCheckOutDate(), 1);
         verify(pricingService).calculateTotalPrice(any(RoomTypeResponse.class), any(), any());
-        verify(bookingRepository, never()).saveAndFlush(any());
+        verify(bookingRepository).saveAndFlush(any());
         verify(eventPublisher, never()).publishBookingCreated(any());
     }
 
@@ -254,18 +254,16 @@ class BookingServiceTest {
     }
 
     @Test
-    void createBooking_BookingTransactionFailureReleasesCommittedInventory() {
+    void createBooking_BookingTransactionFailureDoesNotReserveInventory() {
         // Given
         when(hotelCatalogClient.getRoomType(roomTypeId)).thenReturn(roomType(4));
-        when(inventoryService.reserveInventory(any(), any(), any(), eq(1))).thenReturn(true);
         when(pricingService.calculateTotalPrice(any(RoomTypeResponse.class), any(), any())).thenReturn(BigDecimal.valueOf(200));
         when(bookingRepository.saveAndFlush(any(Booking.class))).thenThrow(new RuntimeException("Database error"));
 
         // When & Then
         assertThrows(RuntimeException.class, () -> bookingService.createBooking(bookingRequest));
 
-        verify(inventoryService).releaseInventory(roomTypeId, bookingRequest.getCheckInDate(),
-                bookingRequest.getCheckOutDate(), 1);
+        verifyNoInteractions(inventoryService);
     }
 
     @Test
@@ -282,9 +280,9 @@ class BookingServiceTest {
                 hotelCatalogClient, pricingService, inventoryService, bookingRepository, eventPublisher);
         ordered.verify(hotelCatalogClient).getRoomType(roomTypeId);
         ordered.verify(pricingService).calculateTotalPrice(any(RoomTypeResponse.class), any(), any());
+        ordered.verify(bookingRepository).saveAndFlush(any(Booking.class));
         ordered.verify(inventoryService).reserveInventory(roomTypeId,
                 bookingRequest.getCheckInDate(), bookingRequest.getCheckOutDate(), 1);
-        ordered.verify(bookingRepository).saveAndFlush(any(Booking.class));
         ordered.verify(eventPublisher).publishBookingCreated(any());
     }
 
@@ -321,6 +319,38 @@ class BookingServiceTest {
         assertEquals(bookingId, response.getId());
         verifyNoInteractions(hotelCatalogClient, inventoryService, pricingService);
         verify(bookingRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void createBooking_ConcurrentDuplicateReturnsWinnerAfterRollback() {
+        when(bookingRepository.findByUserIdAndIdempotencyKey(userId, "racing-request"))
+                .thenReturn(Optional.empty(), Optional.of(booking));
+        when(hotelCatalogClient.getRoomType(roomTypeId)).thenReturn(roomType(4));
+        when(pricingService.calculateTotalPrice(any(RoomTypeResponse.class), any(), any()))
+                .thenReturn(BigDecimal.valueOf(200));
+        when(bookingRepository.saveAndFlush(any()))
+                .thenThrow(new org.springframework.dao.DataIntegrityViolationException("duplicate key"));
+
+        BookingResponse response = bookingService.createBooking(bookingRequest, "racing-request");
+
+        assertEquals(bookingId, response.getId());
+        verifyNoInteractions(inventoryService, eventPublisher);
+    }
+
+    @Test
+    void createBooking_ConcurrentDuplicateWithDifferentPayloadIsRejected() {
+        booking.setGuests(3);
+        when(bookingRepository.findByUserIdAndIdempotencyKey(userId, "racing-request"))
+                .thenReturn(Optional.empty(), Optional.of(booking));
+        when(hotelCatalogClient.getRoomType(roomTypeId)).thenReturn(roomType(4));
+        when(pricingService.calculateTotalPrice(any(RoomTypeResponse.class), any(), any()))
+                .thenReturn(BigDecimal.valueOf(200));
+        when(bookingRepository.saveAndFlush(any()))
+                .thenThrow(new org.springframework.dao.DataIntegrityViolationException("duplicate key"));
+
+        assertThrows(BookingConflictException.class,
+                () -> bookingService.createBooking(bookingRequest, "racing-request"));
+        verifyNoInteractions(inventoryService, eventPublisher);
     }
 
     @Test

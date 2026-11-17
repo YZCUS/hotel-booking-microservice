@@ -88,39 +88,26 @@ public class BookingService {
         BigDecimal totalPrice = pricingService.calculateTotalPrice(
                 roomType, request.getCheckInDate(), request.getCheckOutDate());
 
-        // Inventory commits independently; compensate it if the short booking/outbox transaction fails.
-        boolean inventoryReserved = false;
+        // Persist the idempotency key, inventory change and event atomically. The unique
+        // key serializes duplicate requests before they can reserve additional inventory.
         try {
-            inventoryReserved = inventoryService.reserveInventory(
-                request.getRoomTypeId(),
-                request.getCheckInDate(),
-                request.getCheckOutDate(),
-                1  // Reserve one room
-            );
-            
-            if (!inventoryReserved) {
-                throw new InsufficientInventoryException("No rooms available for selected dates");
-            }
-            
-            // Create booking
-            Booking booking = Booking.builder()
-                .userId(request.getUserId())
-                .roomTypeId(request.getRoomTypeId())
-                .checkInDate(request.getCheckInDate())
-                .checkOutDate(request.getCheckOutDate())
-                .guests(request.getGuests())
-                .totalPrice(totalPrice)
-                .status(BookingStatus.CONFIRMED)
-                .idempotencyKey(normalizedIdempotencyKey)
-                .build();
-            
             Booking saved = bookingTransactionOperations.execute(status -> {
-                Booking persisted;
-                try {
-                    persisted = bookingRepository.saveAndFlush(booking);
-                } catch (DataIntegrityViolationException e) {
-                    throw new BookingConflictException(
-                            "Idempotency-Key is already being processed", e);
+                Booking booking = Booking.builder()
+                    .userId(request.getUserId())
+                    .roomTypeId(request.getRoomTypeId())
+                    .checkInDate(request.getCheckInDate())
+                    .checkOutDate(request.getCheckOutDate())
+                    .guests(request.getGuests())
+                    .totalPrice(totalPrice)
+                    .status(BookingStatus.CONFIRMED)
+                    .idempotencyKey(normalizedIdempotencyKey)
+                    .build();
+                Booking persisted = bookingRepository.saveAndFlush(booking);
+
+                boolean reserved = inventoryService.reserveInventory(
+                        request.getRoomTypeId(), request.getCheckInDate(), request.getCheckOutDate(), 1);
+                if (!reserved) {
+                    throw new InsufficientInventoryException("No rooms available for selected dates");
                 }
 
                 BookingCreatedEvent event = BookingCreatedEvent.builder()
@@ -137,26 +124,20 @@ public class BookingService {
                 eventPublisher.publishBookingCreated(event);
                 return persisted;
             });
-            
             log.info("Successfully created booking: {} for user: {}", saved.getId(), request.getUserId());
             return mapToResponse(saved);
-            
-        } catch (RuntimeException e) {
-            if (inventoryReserved) {
-                try {
-                    inventoryService.releaseInventory(
-                            request.getRoomTypeId(), request.getCheckInDate(),
-                            request.getCheckOutDate(), 1);
-                    log.info("Released inventory after booking transaction failure");
-                } catch (RuntimeException releaseException) {
-                    log.error("Failed to release inventory after booking transaction failure",
-                            releaseException);
+        } catch (DataIntegrityViolationException error) {
+            // The failed transaction has rolled back before looking up the winning request.
+            if (normalizedIdempotencyKey != null) {
+                Booking existing = bookingRepository
+                        .findByUserIdAndIdempotencyKey(request.getUserId(), normalizedIdempotencyKey)
+                        .orElse(null);
+                if (existing != null) {
+                    validateIdempotentRetry(existing, request);
+                    return mapToResponse(existing);
                 }
             }
-            if (e instanceof OptimisticLockingFailureException) {
-                log.warn("Optimistic lock failure during booking creation; retrying", e);
-            }
-            throw e;
+            throw error;
         }
     }
     

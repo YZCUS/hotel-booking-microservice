@@ -4,6 +4,8 @@ import com.hotel.gateway.config.GatewayApiProperties;
 import com.hotel.gateway.handler.GatewayErrorResponder;
 import com.hotel.gateway.util.InternalServiceTokenProvider;
 import com.hotel.gateway.util.JwtUtil;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.Jwts;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
@@ -24,6 +26,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 class JwtAuthenticationFilterTest {
@@ -82,10 +85,8 @@ class JwtAuthenticationFilterTest {
     @Test
     void validTokenForProtectedRouteForwardsVerifiedIdentityAndRole() {
         String token = "valid-token";
-        when(jwtUtil.validateToken(token)).thenReturn(true);
-        when(jwtUtil.extractUserId(token)).thenReturn("2a1d665b-1b43-4892-a5ae-b8a8779d8d3a");
-        when(jwtUtil.extractEmail(token)).thenReturn("admin@example.com");
-        when(jwtUtil.extractRole(token)).thenReturn("ADMIN");
+        when(jwtUtil.parseValidatedClaims(token)).thenReturn(
+                claims("2a1d665b-1b43-4892-a5ae-b8a8779d8d3a", "admin@example.com", "ADMIN"));
 
         MockServerWebExchange exchange = exchange(MockServerHttpRequest.get("/api/v1/bookings/me")
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
@@ -99,11 +100,13 @@ class JwtAuthenticationFilterTest {
         assertEquals(List.of("admin@example.com"), headers.get("X-User-Email"));
         assertEquals(List.of("ADMIN"), headers.get("X-User-Role"));
         assertEquals(List.of("true"), headers.get("X-Authenticated"));
+        verify(jwtUtil).parseValidatedClaims(token);
+        verifyNoMoreInteractions(jwtUtil);
     }
 
     @Test
     void invalidTokenForProtectedRouteReturnsUnauthorized() {
-        when(jwtUtil.validateToken("bad-token")).thenReturn(false);
+        when(jwtUtil.parseValidatedClaims("bad-token")).thenReturn(null);
         MockServerWebExchange exchange = exchange(MockServerHttpRequest.get("/api/v1/bookings/me")
                 .header(HttpHeaders.AUTHORIZATION, "Bearer bad-token"));
 
@@ -161,10 +164,8 @@ class JwtAuthenticationFilterTest {
     @Test
     void hotelGetWithValidTokenForwardsVerifiedIdentity() {
         String token = "valid-token";
-        when(jwtUtil.validateToken(token)).thenReturn(true);
-        when(jwtUtil.extractUserId(token)).thenReturn("2a1d665b-1b43-4892-a5ae-b8a8779d8d3a");
-        when(jwtUtil.extractEmail(token)).thenReturn("staff@example.com");
-        when(jwtUtil.extractRole(token)).thenReturn("HOTEL_STAFF");
+        when(jwtUtil.parseValidatedClaims(token)).thenReturn(
+                claims("2a1d665b-1b43-4892-a5ae-b8a8779d8d3a", "staff@example.com", "HOTEL_STAFF"));
 
         MockServerWebExchange exchange = exchange(MockServerHttpRequest.get("/api/v1/hotels")
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + token));
@@ -179,7 +180,7 @@ class JwtAuthenticationFilterTest {
 
     @Test
     void hotelGetWithInvalidTokenReturnsUnauthorized() {
-        when(jwtUtil.validateToken("expired-token")).thenReturn(false);
+        when(jwtUtil.parseValidatedClaims("expired-token")).thenReturn(null);
         MockServerWebExchange exchange = exchange(MockServerHttpRequest.get("/api/v1/hotels")
                 .header(HttpHeaders.AUTHORIZATION, "Bearer expired-token"));
 
@@ -203,10 +204,8 @@ class JwtAuthenticationFilterTest {
     @Test
     void tokenWithoutRoleClaimIsRejectedInsteadOfDefaultingToUser() {
         String token = "legacy-token-without-role";
-        when(jwtUtil.validateToken(token)).thenReturn(true);
-        when(jwtUtil.extractUserId(token)).thenReturn("2a1d665b-1b43-4892-a5ae-b8a8779d8d3a");
-        when(jwtUtil.extractEmail(token)).thenReturn("legacy@example.com");
-        when(jwtUtil.extractRole(token)).thenReturn(null);
+        when(jwtUtil.parseValidatedClaims(token)).thenReturn(
+                claims("2a1d665b-1b43-4892-a5ae-b8a8779d8d3a", "legacy@example.com", null));
 
         MockServerWebExchange exchange = exchange(MockServerHttpRequest.get("/api/v1/bookings/me")
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + token));
@@ -215,6 +214,13 @@ class JwtAuthenticationFilterTest {
 
         assertSame(HttpStatus.UNAUTHORIZED, exchange.getResponse().getStatusCode());
         verify(chain, never()).filter(any());
+    }
+
+    private Claims claims(String userId, String email, String role) {
+        Claims claims = Jwts.claims().setSubject(email);
+        claims.put("userId", userId);
+        claims.put("role", role);
+        return claims;
     }
 
     private MockServerWebExchange exchange(MockServerHttpRequest.BaseBuilder<?> requestBuilder) {
