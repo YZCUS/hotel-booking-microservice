@@ -22,6 +22,15 @@ public class EmailConfig {
     
     @Value("${spring.mail.password}")
     private String password;
+
+    @Value("${spring.mail.properties.mail.smtp.auth:true}")
+    private boolean smtpAuth;
+
+    @Value("${spring.mail.properties.mail.smtp.starttls.enable:true}")
+    private boolean startTlsEnabled;
+
+    @Value("${spring.mail.properties.mail.smtp.starttls.required:true}")
+    private boolean startTlsRequired;
     
     @Bean
     public JavaMailSender javaMailSender() {
@@ -33,9 +42,9 @@ public class EmailConfig {
         
         Properties props = mailSender.getJavaMailProperties();
         props.put("mail.transport.protocol", "smtp");
-        props.put("mail.smtp.auth", "true");
-        props.put("mail.smtp.starttls.enable", "true");
-        props.put("mail.smtp.starttls.required", "true");
+        props.put("mail.smtp.auth", Boolean.toString(smtpAuth));
+        props.put("mail.smtp.starttls.enable", Boolean.toString(startTlsEnabled));
+        props.put("mail.smtp.starttls.required", Boolean.toString(startTlsRequired));
         props.put("mail.debug", "false");
         
         return mailSender;
