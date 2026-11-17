@@ -24,6 +24,10 @@ public class JwtUtil {
     }
     
     public boolean validateToken(String token) {
+        return parseValidatedClaims(token) != null;
+    }
+
+    public Claims parseValidatedClaims(String token) {
         try {
             Claims claims = Jwts.parserBuilder()
                 .setSigningKey(getSigningKey())
@@ -31,10 +35,11 @@ public class JwtUtil {
                 .parseClaimsJws(token)
                 .getBody();
             
-            return !claims.getExpiration().before(new Date());
+            return claims.getExpiration() != null && !claims.getExpiration().before(new Date())
+                    ? claims : null;
         } catch (Exception e) {
             log.debug("JWT validation failed: {}", e.getMessage());
-            return false;
+            return null;
         }
     }
     

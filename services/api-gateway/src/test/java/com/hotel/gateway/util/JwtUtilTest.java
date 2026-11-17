@@ -14,6 +14,8 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 class JwtUtilTest {
 
@@ -40,6 +42,35 @@ class JwtUtilTest {
         String token = token(new Date(System.currentTimeMillis() + 60_000), null);
 
         assertNull(jwtUtil.extractRole(token));
+    }
+
+    @Test
+    void validatedClaimsRetainVerifiedIdentity() {
+        var claims = jwtUtil.parseValidatedClaims(token(new Date(System.currentTimeMillis() + 60_000), "USER"));
+
+        assertNotNull(claims);
+        assertEquals("user@example.com", claims.getSubject());
+        assertEquals("USER", claims.get("role", String.class));
+        assertNotNull(UUID.fromString(claims.get("userId", String.class)));
+    }
+
+    @Test
+    void expiredAndMalformedTokensDoNotExposeClaims() {
+        assertNull(jwtUtil.parseValidatedClaims(token(new Date(System.currentTimeMillis() - 1_000), "USER")));
+        assertNull(jwtUtil.parseValidatedClaims("not-a-jwt"));
+    }
+
+    @Test
+    void tokenSignedWithAnotherKeyDoesNotExposeClaims() {
+        String token = token(new Date(System.currentTimeMillis() + 60_000), "ADMIN");
+        ReflectionTestUtils.setField(jwtUtil, "secretKey", SECRET + "different-key");
+
+        assertNull(jwtUtil.parseValidatedClaims(token));
+    }
+
+    @Test
+    void tokenWithoutExpirationIsRejected() {
+        assertNull(jwtUtil.parseValidatedClaims(token(null, "USER")));
     }
 
     private String token(Date expiration, String role) {
